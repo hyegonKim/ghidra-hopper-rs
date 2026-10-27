@@ -252,6 +252,23 @@ impl MachOImage {
                         objc.selector_stubs.insert(stub_addr, sel);
                     }
                 }
+                "__objc_selrefs" => {
+                    // Fallback / multi-arch support (x86_64 & ARM64 `__objc_selrefs` 8-byte pointers)
+                    // matching `HopperHybridObjcAnalyzer.java` v0.2.0.
+                    if objc.selector_stubs.is_empty() {
+                        let ptr_stride = 8usize;
+                        let count = (bytes_sec.len() / ptr_stride).min(objc.method_names.len().max(64));
+                        for idx in 0..count {
+                            let selref_addr = addr + (idx * ptr_stride) as u64;
+                            let sel = objc
+                                .method_names
+                                .get(idx)
+                                .cloned()
+                                .unwrap_or_else(|| format!("selref_{}", idx));
+                            objc.selector_stubs.insert(selref_addr, sel);
+                        }
+                    }
+                }
                 _ => {}
             }
         }

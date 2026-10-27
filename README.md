@@ -1,6 +1,6 @@
-# ghidra-hopper-rs
+# ghidra-hopper-rs (v0.2.0)
 
-**Rust-Native Reverse Engineering Engine** combining **Ghidra 12.3_DEV** (`SLEIGH` / `P-Code` SSA Decompiler, `ObjcMessageAnalyzer`, `DecompilerSwitchAnalysisCmd`, `JumpTable`, `ReferenceManager`, `BookmarkManager`) with **Hopper Disassembler's 5 Core Architectural Advantages** (O(1) `ByteType` Reactive State Machine, Zero-IPC `__objc_stubs` / `__objc_selrefs` `CALL_OBJC` Recovery, `SwitchHintTable` Indirect Branch Override, 4-Mode Unified View `[ASM | CFG | Pseudocode | Hex]`, and Built-in STDIO MCP Server).
+**Rust-Native Reverse Engineering Engine** combining **Ghidra 12.3_DEV (`1b9e58a915`, 2026-10-27)** (`SLEIGH` / `P-Code` SSA Decompiler, `ObjcMessageAnalyzer`, `DecompilerSwitchAnalysisCmd`, `JumpTable`, `ReferenceManager`, `BookmarkManager`) with **Hopper Disassembler 6.6.0 (`42.6316032`)** and **REA 6.8.0 (`v49` skill, 229 tools)** (O(1) `ByteType` Reactive State Machine, Zero-IPC `__objc_stubs` / `__objc_selrefs` `CALL_OBJC` Recovery, `SwitchHintTable` Indirect Branch Override, 4-Mode Unified View `[ASM | CFG | Pseudocode | Hex]`, and Built-in STDIO MCP Server).
 
 ---
 
@@ -69,21 +69,23 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n{"jsonrpc":"2.0","id":2,
 ```
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"ghidra-hopper-rs-mcp","version":"0.1.0"},"capabilities":{"tools":{}}}}
-{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"binary_overview","description":"Return Hopper Byte-State + Ghidra P-Code hybrid overview"},{"name":"decompile_objc","description":"Decompile procedure with Ghidra P-Code and Hopper CALL_OBJC selectors"}]}}
-{"jsonrpc":"2.0","id":3,"result":{"summary":{"engine":"ghidra-hopper-rs","status":"ready","ported_analyzers":["ObjcMessageAnalyzer","DecompilerSwitchAnalysisCmd","HopperHybridObjcAnalyzer"]}}}
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"ghidra-hopper-rs-mcp","version":"0.2.0","reaCompat":"6.8.0","ghidraRev":"12.3_DEV-1b9e58a915","hopperBuild":"6.6.0-42.6316032"},"capabilities":{"tools":{}}}}
+{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"binary_overview","description":"Return Hopper Byte-State + Ghidra P-Code hybrid overview"},{"name":"decompile_objc","description":"Decompile procedure with Ghidra P-Code and Hopper CALL_OBJC selectors"},{"name":"provider_status","description":"Return synced Ghidra 12.3_DEV, Hopper 6.6.0, and REA 6.8.0 provider state"}]}}
+{"jsonrpc":"2.0","id":3,"result":{"summary":{"engine":"ghidra-hopper-rs","version":"0.2.0","rea_mcp":"6.8.0","ghidra":"12.3_DEV (1b9e58a915)","hopper":"6.6.0 (42.6316032)","status":"ready","ported_analyzers":["ObjcMessageAnalyzer","DecompilerSwitchAnalysisCmd","HopperHybridObjcAnalyzer"]}}}
 ```
 
 ### Step 3: 실제 Mach-O Universal 바이너리 Zero-IPC 분석 및 4-Mode 렌더링 검증
 
 ```bash
 cargo build --release
-./target/release/ghidra-hopper-rs demo "/Applications/Hopper Disassembler.app/Contents/MacOS/hopper"
+cp target/release/ghidra-hopper-rs ~/.local/bin/ghidra-hopper-rs
+ghidra-hopper-rs demo "/Applications/Hopper Disassembler.app/Contents/MacOS/hopper"
 ```
 
 ```text
 ╔════════════════════════════════════════════════════════════════════════╗
-║  Ghidra 12.3 + Hopper Hybrid Engine (Rust Port) - Zero-IPC Pipeline    ║
+║  Ghidra 12.3_DEV + Hopper 6.6.0 Hybrid Engine (ghidra-hopper-rs v0.2.0)║
+║  Synced Providers: Ghidra 1b9e58a915 | Hopper 42.6316032 | REA 6.8.0   ║
 ╚════════════════════════════════════════════════════════════════════════╝
 
 [1] Zero-Copy Rust Mach-O -> GhidraProgram Loader: `/Applications/Hopper Disassembler.app/Contents/MacOS/hopper`

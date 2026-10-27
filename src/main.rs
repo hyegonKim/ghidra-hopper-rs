@@ -67,14 +67,15 @@ fn main() {
     let mode = args.get(1).map(String::as_str).unwrap_or("demo");
 
     if mode == "mcp" {
-        let summary = r#"{"engine":"ghidra-hopper-rs","status":"ready","ported_analyzers":["ObjcMessageAnalyzer","DecompilerSwitchAnalysisCmd","HopperHybridObjcAnalyzer"]}"#;
+        let summary = r#"{"engine":"ghidra-hopper-rs","version":"0.2.0","rea_mcp":"6.8.0","ghidra":"12.3_DEV (1b9e58a915)","hopper":"6.6.0 (42.6316032)","status":"ready","ported_analyzers":["ObjcMessageAnalyzer","DecompilerSwitchAnalysisCmd","HopperHybridObjcAnalyzer"]}"#;
         let _ = mcp_server::run_stdio_mcp_loop(summary);
         return;
     }
 
     let start_time = Instant::now();
     println!("╔════════════════════════════════════════════════════════════════════════╗");
-    println!("║  Ghidra 12.3 + Hopper Hybrid Engine (Rust Port) - Zero-IPC Pipeline    ║");
+    println!("║  Ghidra 12.3_DEV + Hopper 6.6.0 Hybrid Engine (ghidra-hopper-rs v0.2.0)║");
+    println!("║  Synced Providers: Ghidra 1b9e58a915 | Hopper 42.6316032 | REA 6.8.0   ║");
     println!("╚════════════════════════════════════════════════════════════════════════╝");
 
     let default_hopper_bin = "/Applications/Hopper Disassembler.app/Contents/MacOS/Hopper Disassembler";
