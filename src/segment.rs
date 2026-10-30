@@ -398,15 +398,74 @@ impl Segment {
         }
         found
     }
+
+    /// Hopper Interactive Hotkey State Machine (`C` = Code, `P` = Procedure, `A` = Ascii,
+    /// `D` = Int64 Data, `U` = Undefine entire object from its head byte).
+    pub fn apply_hopper_hotkey(&mut self, addr: u64, hotkey: char) -> bool {
+        match hotkey.to_ascii_uppercase() {
+            'C' => self.mark_as_code(addr, 4),
+            'P' => self.mark_as_procedure(addr, 4),
+            'D' => self.set_type_at_address(addr, 8, ByteType::Int64),
+            'A' => {
+                let Some(off) = self.offset_of(addr) else {
+                    return false;
+                };
+                let mut len = 0usize;
+                while off + len < self.data.len() && is_printable_ascii(self.data[off + len]) {
+                    len += 1;
+                }
+                if len == 0 {
+                    return false;
+                }
+                let total = if off + len < self.data.len() && self.data[off + len] == 0 {
+                    len + 1
+                } else {
+                    len
+                };
+                self.set_type_at_address(addr, total, ByteType::Ascii)
+            }
+            'U' => {
+                let head = self.get_instruction_start(addr);
+                if head == BAD_ADDRESS {
+                    return false;
+                }
+                let obj_len = self.get_object_length(head);
+                self.mark_range_as_undefined(head, obj_len)
+            }
+            _ => false,
+        }
+    }
 }
 
 fn is_printable_ascii(b: u8) -> bool {
     (0x20..=0x7e).contains(&b)
 }
 
-/// Lightweight Swift / C++ / ObjC symbol demangler.
+/// Hopper-style Swift 5 (`_$s` / `$s`), C++ (`__Z`), and Objective-C (`-[Class sel:]`) symbol demangler.
+/// Parses length-prefixed Swift 5 identifiers into `Module.Type.method(...)` notation.
 pub fn demangle_symbol(sym: &str) -> String {
     if let Some(rest) = sym.strip_prefix("_$s").or_else(|| sym.strip_prefix("$s")) {
+        let mut parts = Vec::new();
+        let bytes = rest.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i].is_ascii_digit() {
+                let mut num = 0usize;
+                while i < bytes.len() && bytes[i].is_ascii_digit() {
+                    num = num * 10 + (bytes[i] - b'0') as usize;
+                    i += 1;
+                }
+                if num > 0 && i + num <= bytes.len() {
+                    parts.push(String::from_utf8_lossy(&bytes[i..i + num]).to_string());
+                    i += num;
+                    continue;
+                }
+            }
+            i += 1;
+        }
+        if !parts.is_empty() {
+            return format!("swift::{}", parts.join("."));
+        }
         return format!("swift::{}", rest);
     }
     if let Some(rest) = sym.strip_prefix("__Z").or_else(|| sym.strip_prefix("_Z")) {

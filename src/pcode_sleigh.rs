@@ -81,6 +81,15 @@ impl Varnode {
             SpaceKind::Unique => format!("u_{:x}", self.offset),
         }
     }
+
+    pub fn display_arm64_with_aliases(&self, aliases: &BTreeMap<u64, String>) -> String {
+        if self.space == SpaceKind::Register {
+            if let Some(custom) = aliases.get(&self.offset) {
+                return custom.clone();
+            }
+        }
+        self.display_arm64()
+    }
 }
 
 /// Core subset of Ghidra P-Code opcodes (`OpCode`), augmented with `CallObjC` for Hopper parity.
@@ -462,17 +471,40 @@ pub fn decode_and_lift_arm64(
 }
 
 /// Hybrid Ghidra P-Code + Hopper Objective-C Structured Decompiler.
-/// Folds register constants/ADRP+ADD pairs and emits clean C / Objective-C pseudocode.
+/// Folds register constants/ADRP+ADD pairs, applies Hopper register aliases (`self`, `_cmd`, user renames),
+/// and emits clean C / Objective-C pseudocode.
 pub fn decompile_instructions_to_pseudocode(
     proc_name: &str,
     entry_addr: u64,
     insns: &[DecodedInstruction],
     seg: &Segment,
 ) -> String {
+    decompile_instructions_to_pseudocode_with_aliases(
+        proc_name,
+        entry_addr,
+        insns,
+        seg,
+        &BTreeMap::new(),
+    )
+}
+
+pub fn decompile_instructions_to_pseudocode_with_aliases(
+    proc_name: &str,
+    entry_addr: u64,
+    insns: &[DecodedInstruction],
+    seg: &Segment,
+    reg_aliases: &BTreeMap<u64, String>,
+) -> String {
     let mut out = String::new();
+    let is_objc_method = proc_name.starts_with("-[") || proc_name.starts_with("+[");
+    let sig_params = if is_objc_method {
+        "id self, SEL _cmd"
+    } else {
+        ""
+    };
     out.push_str(&format!(
-        "// Ghidra-Hopper Hybrid Decompiler (P-Code SSA + ObjC Metadata)\nint64_t {}() {{ // @ 0x{:x}\n",
-        proc_name, entry_addr
+        "// Ghidra-Hopper Hybrid Decompiler (P-Code SSA + ObjC Metadata + Hopper Register Aliases)\nint64_t {}({}) {{ // @ 0x{:x}\n",
+        proc_name, sig_params, entry_addr
     ));
 
     let mut reg_consts: BTreeMap<u64, u64> = BTreeMap::new();
@@ -486,8 +518,8 @@ pub fn decompile_instructions_to_pseudocode(
                     }
                     out.push_str(&format!(
                         "    {} = {};\n",
-                        dst.display_arm64(),
-                        src.display_arm64()
+                        dst.display_arm64_with_aliases(reg_aliases),
+                        src.display_arm64_with_aliases(reg_aliases)
                     ));
                 }
                 PcodeOp::IntAdd { dst, lhs, rhs } => {
@@ -501,7 +533,7 @@ pub fn decompile_instructions_to_pseudocode(
                             if let Some(s) = read_ascii_at(seg, resolved) {
                                 out.push_str(&format!(
                                     "    {} = \"{}\"; // 0x{:x}\n",
-                                    dst.display_arm64(),
+                                    dst.display_arm64_with_aliases(reg_aliases),
                                     s,
                                     resolved
                                 ));
@@ -511,23 +543,23 @@ pub fn decompile_instructions_to_pseudocode(
                     }
                     out.push_str(&format!(
                         "    {} = {} + {};\n",
-                        dst.display_arm64(),
-                        lhs.display_arm64(),
-                        rhs.display_arm64()
+                        dst.display_arm64_with_aliases(reg_aliases),
+                        lhs.display_arm64_with_aliases(reg_aliases),
+                        rhs.display_arm64_with_aliases(reg_aliases)
                     ));
                 }
                 PcodeOp::IntSub { dst, lhs, rhs } => {
                     out.push_str(&format!(
                         "    {} = {} - {};\n",
-                        dst.display_arm64(),
-                        lhs.display_arm64(),
-                        rhs.display_arm64()
+                        dst.display_arm64_with_aliases(reg_aliases),
+                        lhs.display_arm64_with_aliases(reg_aliases),
+                        rhs.display_arm64_with_aliases(reg_aliases)
                     ));
                 }
                 PcodeOp::CBranch { cond, target } => {
                     out.push_str(&format!(
                         "    if ({}) goto loc_{:x};\n",
-                        cond.display_arm64(),
+                        cond.display_arm64_with_aliases(reg_aliases),
                         target
                     ));
                 }
@@ -539,11 +571,14 @@ pub fn decompile_instructions_to_pseudocode(
                     switch_targets,
                 } => {
                     if switch_targets.is_empty() {
-                        out.push_str(&format!("    goto *{};\n", target_reg.display_arm64()));
+                        out.push_str(&format!(
+                            "    goto *{};\n",
+                            target_reg.display_arm64_with_aliases(reg_aliases)
+                        ));
                     } else {
                         out.push_str(&format!(
                             "    switch ({}) {{ // Hopper SwitchHint recovered {} cases\n",
-                            target_reg.display_arm64(),
+                            target_reg.display_arm64_with_aliases(reg_aliases),
                             switch_targets.len()
                         ));
                         for (idx, t) in switch_targets.iter().enumerate() {
@@ -554,15 +589,24 @@ pub fn decompile_instructions_to_pseudocode(
                 }
                 PcodeOp::CallObjC { selector, .. } => {
                     // Hopper's signature strength: readable Objective-C message syntax!
+                    let recv_name = reg_aliases
+                        .get(&0)
+                        .map(String::as_str)
+                        .unwrap_or("x0");
                     let arg_preview = reg_consts
                         .get(&2)
                         .and_then(|&a| read_ascii_at(seg, a))
                         .map(|s| format!("@\"{}\"", s))
-                        .unwrap_or_else(|| "x2".to_string());
+                        .unwrap_or_else(|| {
+                            reg_aliases.get(&2).cloned().unwrap_or_else(|| "x2".to_string())
+                        });
                     if selector.contains(':') {
-                        out.push_str(&format!("    x0 = [x0 {}{}];\n", selector, arg_preview));
+                        out.push_str(&format!(
+                            "    {} = [{} {}{}];\n",
+                            recv_name, recv_name, selector, arg_preview
+                        ));
                     } else {
-                        out.push_str(&format!("    x0 = [x0 {}];\n", selector));
+                        out.push_str(&format!("    {} = [{} {}];\n", recv_name, recv_name, selector));
                     }
                 }
                 PcodeOp::Call { target, symbol } => {
@@ -572,7 +616,10 @@ pub fn decompile_instructions_to_pseudocode(
                     out.push_str(&format!("    x0 = {}(x0, x1);\n", name));
                 }
                 PcodeOp::Return { retval } => {
-                    out.push_str(&format!("    return {};\n", retval.display_arm64()));
+                    out.push_str(&format!(
+                        "    return {};\n",
+                        retval.display_arm64_with_aliases(reg_aliases)
+                    ));
                 }
                 _ => {}
             }

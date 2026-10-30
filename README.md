@@ -1,6 +1,6 @@
-# ghidra-hopper-rs (v0.2.0)
+# ghidra-hopper-rs (v0.3.0)
 
-**Rust-Native Reverse Engineering Engine** combining **Ghidra 12.3_DEV (`1b9e58a915`, 2026-10-27)** (`SLEIGH` / `P-Code` SSA Decompiler, `ObjcMessageAnalyzer`, `DecompilerSwitchAnalysisCmd`, `JumpTable`, `ReferenceManager`, `BookmarkManager`) with **Hopper Disassembler 6.6.0 (`42.6316032`)** and **REA 6.8.0 (`v49` skill, 229 tools)** (O(1) `ByteType` Reactive State Machine, Zero-IPC `__objc_stubs` / `__objc_selrefs` `CALL_OBJC` Recovery, `SwitchHintTable` Indirect Branch Override, 4-Mode Unified View `[ASM | CFG | Pseudocode | Hex]`, and Built-in STDIO MCP Server).
+**Rust-Native Reverse Engineering Engine** combining **Ghidra 12.3_DEV (`4718f50d99`, 2026-10-31)** (`SLEIGH` / `P-Code` SSA Decompiler, `ObjcMessageAnalyzer`, `DecompilerSwitchAnalysisCmd`, `JumpTable`, `ReferenceManager`, `BookmarkManager`) with **Hopper Disassembler 6.6.0 (`42.6316032`)** and **REA 6.8.0 (`v49` skill, 229 tools, 15 Frontier Agents configured)** (O(1) `ByteType` Reactive State Machine & `C/P/A/D/U` Interactive Hotkeys, Zero-IPC `__objc_stubs` / `__objc_selrefs` `CALL_OBJC` Recovery, Swift 5 `$s` Demangler, Objective-C `self`/`_cmd` Register Aliasing, `SwitchHintTable` Indirect Branch Override, 4-Mode Unified View `[ASM | CFG | Pseudocode | Hex]`, and Built-in STDIO MCP Server).
 
 ---
 

@@ -192,11 +192,18 @@ impl GhidraProgram {
     }
 
     pub fn text_segment(&self) -> Option<&Segment> {
-        self.segments.first()
+        self.segments
+            .iter()
+            .find(|s| s.name == "__TEXT")
+            .or_else(|| self.segments.first())
     }
 
     pub fn text_segment_mut(&mut self) -> Option<&mut Segment> {
-        self.segments.first_mut()
+        if let Some(pos) = self.segments.iter().position(|s| s.name == "__TEXT") {
+            self.segments.get_mut(pos)
+        } else {
+            self.segments.first_mut()
+        }
     }
 
     pub fn add_memory_reference(

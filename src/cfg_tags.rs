@@ -2,7 +2,7 @@
 //! 4-Mode Unified Renderer (`[ASM | CFG | Pseudocode | Hex]`).
 
 use crate::pcode_sleigh::{
-    decode_and_lift_arm64, decompile_instructions_to_pseudocode, DecodedInstruction,
+    decode_and_lift_arm64, decompile_instructions_to_pseudocode_with_aliases, DecodedInstruction,
     SwitchHintTable,
 };
 use crate::segment::{Segment, Tag};
@@ -112,13 +112,28 @@ impl Procedure {
             });
         }
 
-        Self {
+        let mut proc = Self {
             name: proc_name,
             entry_address,
             basic_blocks,
             tags: BTreeSet::new(),
             register_renames: BTreeMap::new(),
+        };
+        if proc.name.starts_with("-[") || proc.name.starts_with("+[") {
+            proc.apply_objc_abi_aliases();
         }
+        proc
+    }
+
+    /// Hopper `renameRegister` equivalent: assigns a semantic variable name to an ARM64 register.
+    pub fn rename_register(&mut self, reg_idx: u64, alias: impl Into<String>) {
+        self.register_renames.insert(reg_idx, alias.into());
+    }
+
+    /// Hopper Objective-C ABI auto-aliasing (`x0 -> self`, `x1 -> _cmd`).
+    pub fn apply_objc_abi_aliases(&mut self) {
+        self.register_renames.entry(0).or_insert_with(|| "self".into());
+        self.register_renames.entry(1).or_insert_with(|| "_cmd".into());
     }
 
     /// Renders Hopper's 4-Mode Unified View (`ASM`, `CFG` + Minimap, `Pseudocode`, `Hex`).
@@ -191,11 +206,12 @@ impl Procedure {
             .iter()
             .flat_map(|b| b.instructions.iter().cloned())
             .collect();
-        out.push_str(&decompile_instructions_to_pseudocode(
+        out.push_str(&decompile_instructions_to_pseudocode_with_aliases(
             &self.name,
             self.entry_address,
             &all_insns,
             seg,
+            &self.register_renames,
         ));
 
         // MODE 4: Synchronized Hex + Byte-Type Inspector View

@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 
 pub const FAT_MAGIC: u32 = 0xcafebabe;
 pub const MH_MAGIC_64: u32 = 0xfeedfacf;
+pub const ELF_MAGIC: u32 = 0x7f454c46;
 pub const LC_SEGMENT_64: u32 = 0x19;
 pub const LC_MAIN: u32 = 0x80000028;
 
@@ -46,6 +47,11 @@ pub struct MachOImage {
 fn read_u32_be(buf: &[u8], off: usize) -> Option<u32> {
     let s = buf.get(off..off + 4)?;
     Some(u32::from_be_bytes([s[0], s[1], s[2], s[3]]))
+}
+
+fn read_u16_le(buf: &[u8], off: usize) -> Option<u16> {
+    let s = buf.get(off..off + 2)?;
+    Some(u16::from_le_bytes([s[0], s[1]]))
 }
 
 fn read_u32_le(buf: &[u8], off: usize) -> Option<u32> {
@@ -84,6 +90,9 @@ impl MachOImage {
         let magic_le = read_u32_le(bytes, 0).unwrap_or(0);
 
         let mut slices = Vec::new();
+        if magic_be == ELF_MAGIC {
+            return Self::parse_elf64(bytes);
+        }
         let (is_universal, slice_bytes, selected_arch) = if magic_be == FAT_MAGIC {
             let nfat_arch = read_u32_be(bytes, 4).ok_or("Truncated fat_header")? as usize;
             let mut chosen_off = 0usize;
@@ -178,8 +187,8 @@ impl MachOImage {
                     text_vmaddr = vmaddr;
                 }
 
-                // Cap in-memory segment copy to 4 MiB so large binaries stay instantaneous.
-                let capped_size = filesize.min(4 * 1024 * 1024);
+                // Cap in-memory segment copy to 16 MiB so large binaries stay instantaneous.
+                let capped_size = filesize.min(16 * 1024 * 1024);
                 let seg_bytes = if fileoff < slice.len() {
                     let end = (fileoff + capped_size).min(slice.len());
                     slice[fileoff..end].to_vec()
@@ -222,8 +231,8 @@ impl MachOImage {
             entry_point = Some(text_vmaddr.wrapping_add(ep_off));
         }
 
-        // Extract Objective-C & Swift metadata strings (bounded for speed)
-        for (sectname, addr, offset, size) in &sec_ranges {
+        // Pass 1: Extract Objective-C & Swift string tables first (`__objc_methname` often appears after `__objc_stubs`)
+        for (sectname, _addr, offset, size) in &sec_ranges {
             let Some(bytes_sec) = slice.get(*offset..offset.saturating_add((*size).min(262_144))) else {
                 continue;
             };
@@ -238,6 +247,16 @@ impl MachOImage {
                     let mut s = extract_null_terminated_strings(bytes_sec, 80);
                     objc.swift_reflection_strings.append(&mut s);
                 }
+                _ => {}
+            }
+        }
+
+        // Pass 2: Bind `__objc_stubs` and `__objc_selrefs` now that `objc.method_names` is populated
+        for (sectname, addr, offset, size) in &sec_ranges {
+            let Some(bytes_sec) = slice.get(*offset..offset.saturating_add((*size).min(262_144))) else {
+                continue;
+            };
+            match sectname.as_str() {
                 "__objc_stubs" => {
                     // Hopper maps each 32-byte ARM64 stub in `__objc_stubs` to `objc_msgSend$selector`.
                     let stub_stride = 32usize;
@@ -253,8 +272,6 @@ impl MachOImage {
                     }
                 }
                 "__objc_selrefs" => {
-                    // Fallback / multi-arch support (x86_64 & ARM64 `__objc_selrefs` 8-byte pointers)
-                    // matching `HopperHybridObjcAnalyzer.java` v0.2.0.
                     if objc.selector_stubs.is_empty() {
                         let ptr_stride = 8usize;
                         let count = (bytes_sec.len() / ptr_stride).min(objc.method_names.len().max(64));
@@ -275,6 +292,224 @@ impl MachOImage {
 
         Ok(Self {
             is_universal,
+            slices,
+            selected_arch,
+            entry_point,
+            segments,
+            objc,
+        })
+    }
+
+    /// Zero-copy ELF64 (`.so` / executable) loader for Android NDK / Linux ARM64 & x86_64 binaries.
+    /// Extracts `PT_LOAD` segments, section headers, `.dynsym`/`.dynstr` JNI & C++ exports,
+    /// `.rela.plt` -> `.plt` AArch64 call stubs, and `.note.gnu.build-id`.
+    fn parse_elf64(slice: &[u8]) -> Result<Self, String> {
+        if slice.len() < 64 {
+            return Err("Binary too small for ELF64 header".into());
+        }
+        let ei_class = slice[4];
+        if ei_class != 2 {
+            return Err(format!("Unsupported ELF class {} (expected ELF64=2)", ei_class));
+        }
+        let e_machine = read_u16_le(slice, 18).unwrap_or(0);
+        let selected_arch = match e_machine {
+            183 => "arm64",
+            62 => "x86_64",
+            40 => "arm",
+            3 => "i386",
+            _ => "unknown",
+        };
+        let e_entry = read_u64_le(slice, 24).unwrap_or(0);
+        let e_phoff = read_u64_le(slice, 32).unwrap_or(0) as usize;
+        let e_shoff = read_u64_le(slice, 40).unwrap_or(0) as usize;
+        let e_phentsize = read_u16_le(slice, 54).unwrap_or(0) as usize;
+        let e_phnum = read_u16_le(slice, 56).unwrap_or(0) as usize;
+        let e_shentsize = read_u16_le(slice, 58).unwrap_or(0) as usize;
+        let e_shnum = read_u16_le(slice, 60).unwrap_or(0) as usize;
+        let e_shstrndx = read_u16_le(slice, 62).unwrap_or(0) as usize;
+
+        let slices = vec![ArchSlice {
+            cpu_type: e_machine as u32,
+            cpu_subtype: 0,
+            arch_name: selected_arch,
+            offset: 0,
+            size: slice.len(),
+        }];
+
+        let mut segments = Vec::new();
+        if e_phentsize >= 56 {
+            for i in 0..e_phnum.min(64) {
+                let off = e_phoff + i * e_phentsize;
+                if off + 56 > slice.len() {
+                    break;
+                }
+                let p_type = read_u32_le(slice, off).unwrap_or(0);
+                if p_type != 1 {
+                    continue; // PT_LOAD == 1
+                }
+                let _p_flags = read_u32_le(slice, off + 4).unwrap_or(0);
+                let p_offset = read_u64_le(slice, off + 8).unwrap_or(0) as usize;
+                let p_vaddr = read_u64_le(slice, off + 16).unwrap_or(0);
+                let p_filesz = read_u64_le(slice, off + 32).unwrap_or(0) as usize;
+
+                let segname = if segments.is_empty() {
+                    "__TEXT".to_string()
+                } else {
+                    format!("PT_LOAD_{}", segments.len())
+                };
+                let capped = p_filesz.min(16 * 1024 * 1024);
+                let seg_bytes = if p_offset < slice.len() {
+                    let end = (p_offset + capped).min(slice.len());
+                    slice[p_offset..end].to_vec()
+                } else {
+                    Vec::new()
+                };
+                segments.push(Segment::new(segname, p_vaddr, p_offset as u64, seg_bytes));
+            }
+        }
+
+        let mut objc = ObjCMetadata {
+            class_names: Vec::new(),
+            method_names: Vec::new(),
+            selector_stubs: BTreeMap::new(),
+            swift_reflection_strings: Vec::new(),
+        };
+
+        let shstrtab: &[u8] = if e_shentsize >= 64 && e_shstrndx < e_shnum {
+            let sh_off = e_shoff + e_shstrndx * e_shentsize;
+            let off = read_u64_le(slice, sh_off + 24).unwrap_or(0) as usize;
+            let sz = read_u64_le(slice, sh_off + 32).unwrap_or(0) as usize;
+            slice.get(off..off.saturating_add(sz)).unwrap_or(&[])
+        } else {
+            &[]
+        };
+
+        let mut dynsym_range = (0usize, 0usize);
+        let mut dynstr_range = (0usize, 0usize);
+        let mut rela_plt_range = (0usize, 0usize);
+        let mut plt_addr_size = (0u64, 0usize);
+        let mut first_jni_entry: Option<u64> = None;
+
+        if e_shentsize >= 64 {
+            for i in 0..e_shnum.min(256) {
+                let sh_off = e_shoff + i * e_shentsize;
+                if sh_off + 64 > slice.len() {
+                    break;
+                }
+                let sh_name_idx = read_u32_le(slice, sh_off).unwrap_or(0) as usize;
+                let sh_flags = read_u64_le(slice, sh_off + 8).unwrap_or(0) as u32;
+                let sh_addr = read_u64_le(slice, sh_off + 16).unwrap_or(0);
+                let sh_offset = read_u64_le(slice, sh_off + 24).unwrap_or(0) as usize;
+                let sh_size = read_u64_le(slice, sh_off + 32).unwrap_or(0) as usize;
+
+                let sectname = if sh_name_idx < shstrtab.len() {
+                    clean_fixed_str(&shstrtab[sh_name_idx..])
+                } else {
+                    format!("sec_{}", i)
+                };
+
+                if !sectname.is_empty() {
+                    if let Some(seg) = segments.first_mut() {
+                        seg.sections.push(Section {
+                            name: sectname.clone(),
+                            start_address: sh_addr,
+                            length: sh_size as u64,
+                            flags: sh_flags,
+                        });
+                    }
+                }
+
+                match sectname.as_str() {
+                    ".dynsym" => dynsym_range = (sh_offset, sh_size),
+                    ".dynstr" => dynstr_range = (sh_offset, sh_size),
+                    ".rela.plt" => rela_plt_range = (sh_offset, sh_size),
+                    ".plt" => plt_addr_size = (sh_addr, sh_size),
+                    ".note.gnu.build-id" => {
+                        if let Some(note) = slice.get(sh_offset..sh_offset.saturating_add(sh_size)) {
+                            if note.len() >= 16 {
+                                let namesz = read_u32_le(note, 0).unwrap_or(0) as usize;
+                                let descsz = read_u32_le(note, 4).unwrap_or(0) as usize;
+                                let aligned_name = (namesz + 3) & !3;
+                                let desc_start = 12 + aligned_name;
+                                if let Some(desc) = note.get(desc_start..desc_start.saturating_add(descsz)) {
+                                    let hex: String = desc.iter().map(|b| format!("{:02x}", b)).collect();
+                                    objc.swift_reflection_strings.push(format!("gnu.build-id:{}", hex));
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let dynstr = slice
+            .get(dynstr_range.0..dynstr_range.0.saturating_add(dynstr_range.1))
+            .unwrap_or(&[]);
+        let dynsym = slice
+            .get(dynsym_range.0..dynsym_range.0.saturating_add(dynsym_range.1))
+            .unwrap_or(&[]);
+
+        let sym_count = dynsym.len() / 24;
+        let mut sym_names = Vec::with_capacity(sym_count);
+        for i in 0..sym_count {
+            let base = i * 24;
+            let st_name = read_u32_le(dynsym, base).unwrap_or(0) as usize;
+            let st_value = read_u64_le(dynsym, base + 8).unwrap_or(0);
+            let name = if st_name < dynstr.len() {
+                clean_fixed_str(&dynstr[st_name..])
+            } else {
+                String::new()
+            };
+            if st_value != 0 && !name.is_empty() {
+                objc.selector_stubs.insert(st_value, name.clone());
+                if name == "JNI_OnLoad" && first_jni_entry.is_none() {
+                    first_jni_entry = Some(st_value);
+                }
+                if name.starts_with("Java_") || name.starts_with("JNI_") {
+                    objc.method_names.push(name.clone());
+                    if let Some(rest) = name.strip_prefix("Java_") {
+                        if let Some((cls_part, _)) = rest.rsplit_once('_') {
+                            let cls = cls_part.replace('_', ".");
+                            if !objc.class_names.contains(&cls) {
+                                objc.class_names.push(cls);
+                            }
+                        }
+                    }
+                }
+            }
+            sym_names.push(name);
+        }
+
+        // Bind AArch64 `.rela.plt` entries to `.plt` stubs (32-byte header + 16-byte entries)
+        if plt_addr_size.0 != 0 && rela_plt_range.1 >= 24 {
+            if let Some(rela_bytes) =
+                slice.get(rela_plt_range.0..rela_plt_range.0.saturating_add(rela_plt_range.1))
+            {
+                let rela_count = rela_bytes.len() / 24;
+                for i in 0..rela_count {
+                    let base = i * 24;
+                    let r_info = read_u64_le(rela_bytes, base + 8).unwrap_or(0);
+                    let sym_idx = (r_info >> 32) as usize;
+                    let stub_addr = plt_addr_size.0 + 32 + (i as u64) * 16;
+                    if let Some(sym_name) = sym_names.get(sym_idx) {
+                        if !sym_name.is_empty() {
+                            objc.selector_stubs
+                                .insert(stub_addr, format!("plt${}", sym_name));
+                        }
+                    }
+                }
+            }
+        }
+
+        let entry_point = if e_entry != 0 {
+            Some(e_entry)
+        } else {
+            first_jni_entry
+        };
+
+        Ok(Self {
+            is_universal: false,
             slices,
             selected_arch,
             entry_point,
