@@ -4,6 +4,7 @@
 /validation/jni_runtime/build/
 /validation/wide/build/
 /validation/conditional_compare/build/
+/validation/long_movi/build/
 .DS_Store
 *.orig
 *.jar

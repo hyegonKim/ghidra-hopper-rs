@@ -10,6 +10,23 @@ pub fn expanded_bytes(immediate: u8) -> u64 {
         }
     })
 }
+/// Integer MOVI constants only: other modified-immediate operations stay unsupported.
+pub fn movi_immediate(op: bool, cmode: u8, immediate: u8) -> Option<u64> {
+    if op {
+        return (cmode == 14).then(|| expanded_bytes(immediate));
+    }
+    let (element, bits) = match cmode {
+        0 | 2 | 4 | 6 => ((immediate as u64) << (4 * cmode), 32),
+        8 | 10 => ((immediate as u64) << (4 * (cmode - 8)), 16),
+        12 | 13 => {
+            let shift = 8 * (cmode - 11);
+            (((immediate as u64) << shift) | ((1u64 << shift) - 1), 32)
+        }
+        14 => (immediate as u64, 8),
+        _ => return None,
+    };
+    Some((0..64 / bits).fold(0, |value, lane| value | (element << (lane * bits))))
+}
 fn temp(offset: u64) -> Varnode {
     Varnode {
         space: SpaceKind::Unique,
@@ -113,21 +130,49 @@ pub fn decode(address: u64, word: u32) -> Option<DecodedInstruction> {
                 size,
             }
         });
-    } else if word & 0xbff8fc00 == 0x2f00e400 {
+    } else if word & 0x9ff80c00 == 0x0f000400 {
         let register = (word & 31) as u8;
         let full = word & (1 << 30) != 0;
+        let op = word & (1 << 29) != 0;
+        let cmode = ((word >> 12) & 15) as u8;
         let imm = ((((word >> 16) & 7) << 5) | ((word >> 5) & 31)) as u8;
-        let low = expanded_bytes(imm);
+        let low = movi_immediate(op, cmode, imm)?;
         let high = if full { low } else { 0 };
         i.mnemonic = "movi".into();
-        i.raw_args = vec![
-            if full {
-                format!("v{register}.2d")
+        if op {
+            i.raw_args = vec![
+                if full {
+                    format!("v{register}.2d")
+                } else {
+                    format!("d{register}")
+                },
+                format!("#0x{low:016x}"),
+            ];
+        } else {
+            let (bits, modifier, shift) = match cmode {
+                14 => (8, "lsl", 0),
+                8 | 10 => (16, "lsl", 4 * (cmode - 8)),
+                12 | 13 => (32, "msl", 8 * (cmode - 11)),
+                _ => (32, "lsl", 4 * cmode),
+            };
+            let suffix = if bits == 8 {
+                "b"
+            } else if bits == 16 {
+                "h"
             } else {
-                format!("d{register}")
-            },
-            format!("#0x{low:016x}"),
-        ];
+                "s"
+            };
+            i.raw_args = vec![
+                format!(
+                    "v{register}.{}{suffix}",
+                    if full { 128 / bits } else { 64 / bits }
+                ),
+                format!("#0x{imm:x}"),
+            ];
+            if shift != 0 {
+                i.raw_args.push(format!("{modifier} #{shift}"));
+            }
+        }
         i.pcode = vec![PcodeOp::VectorImmediate {
             register,
             low,

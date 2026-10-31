@@ -35,7 +35,7 @@ fn vector_bitmasks_cover_every_pattern_register_and_scalar_upper_clear() {
             }
         }
     }
-    for w in [0x4f00e400, 0x6f00f400, 0x6f00ec00] {
+    for w in [0x4f00f400, 0x6f00f400, 0x6f00ec00] {
         assert!(matches!(decode(w).pcode[0], PcodeOp::Unsupported { .. }));
     }
 }

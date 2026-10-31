@@ -124,6 +124,11 @@ pub fn signed_multiply_high(lhs: u64, rhs: u64) -> u64 {
     let product = (lhs as i64 as i128) * (rhs as i64 as i128);
     (product >> 64) as u64
 }
+pub fn signed_multiply_add_long(lhs: u64, rhs: u64, addend: u64) -> u64 {
+    // Each source is a signed W register, even when Xd aliases Xn/Xm.
+    let product = (lhs as i32 as i64) * (rhs as i32 as i64);
+    addend.wrapping_add(product as u64)
+}
 fn read(r: u64, size: u8) -> Varnode {
     if r == 31 {
         Varnode::imm(0, size)
@@ -188,6 +193,23 @@ pub fn decode(address: u64, word: u32) -> Option<DecodedInstruction> {
             condition,
             nzcv,
             subtract,
+        }];
+    } else if word & 0xffe08000 == 0x9b200000 {
+        let ra = ((word >> 10) & 31) as u64;
+        i.mnemonic = if ra == 31 { "smull" } else { "smaddl" }.into();
+        i.raw_args = vec![name(rd, 8), name(rn, 4), name(rm, 4)];
+        if ra != 31 {
+            i.raw_args.push(name(ra, 8));
+        }
+        i.pcode = vec![PcodeOp::SignedMultiplyAddLong {
+            dst: if rd == 31 {
+                None
+            } else {
+                Some(Varnode::reg(rd, 8))
+            },
+            lhs: read(rn, 4),
+            rhs: read(rm, 4),
+            addend: read(ra, 8),
         }];
     } else if word & 0xffe0fc00 == 0x9b407c00 {
         i.mnemonic = "smulh".into();

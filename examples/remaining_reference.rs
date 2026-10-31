@@ -185,6 +185,21 @@ impl Machine {
                     self.flags = flags.bits();
                 }
             }
+            PcodeOp::SignedMultiplyAddLong {
+                dst,
+                lhs,
+                rhs,
+                addend,
+            } => {
+                let value = ghidra_hopper_rs::arm64_integer::signed_multiply_add_long(
+                    self.read(*lhs),
+                    self.read(*rhs),
+                    self.read(*addend),
+                );
+                if let Some(dst) = dst {
+                    self.write(*dst, value);
+                }
+            }
             PcodeOp::MultiplyAdd {
                 dst,
                 lhs,

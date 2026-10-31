@@ -115,6 +115,12 @@ pub enum PcodeOp {
         lhs: Varnode,
         rhs: Varnode,
     },
+    SignedMultiplyAddLong {
+        dst: Option<Varnode>,
+        lhs: Varnode,
+        rhs: Varnode,
+        addend: Varnode,
+    },
     MultiplyAdd {
         dst: Option<Varnode>,
         lhs: Varnode,
@@ -399,7 +405,9 @@ impl PcodeOp {
             | Self::Logical { dst, .. }
             | Self::ConditionalTransform { dst, .. }
             | Self::RegisterArithmetic { dst, .. } => *dst,
-            Self::MultiplyAdd { dst, .. } | Self::SignedMultiplyHigh { dst, .. } => *dst,
+            Self::MultiplyAdd { dst, .. }
+            | Self::SignedMultiplyHigh { dst, .. }
+            | Self::SignedMultiplyAddLong { dst, .. } => *dst,
             _ => None,
         }
     }
@@ -827,6 +835,7 @@ pub fn decompile_instructions_to_pseudocode_with_aliases(
             match op {
                 PcodeOp::ConditionalCompare {lhs,rhs,width,condition,nzcv,subtract} => out.push_str(&format!("    nzcv = conditional_compare_u{width}(nzcv, {}, {}, {}, fallback=0x{nzcv:x}, subtract={subtract}); // condition reads incoming NZCV; no GPR write\n",condition.expression(),lhs.display_arm64_with_aliases(reg_aliases),rhs.display_arm64_with_aliases(reg_aliases))),
                 PcodeOp::SignedMultiplyHigh {dst,lhs,rhs} => out.push_str(&format!("    {}signed_multiply_high_u64({}, {}); // signed 128-bit product bits 127:64; NZCV preserved\n",dst.map(|v|format!("{} = ",v.display_arm64_with_aliases(reg_aliases))).unwrap_or_default(),lhs.display_arm64_with_aliases(reg_aliases),rhs.display_arm64_with_aliases(reg_aliases))),
+                PcodeOp::SignedMultiplyAddLong {dst,lhs,rhs,addend} => out.push_str(&format!("    {}signed_multiply_add_long_u64({}, {}, {}); // signed 32-bit sources, wrapping 64-bit sum; NZCV preserved\n",dst.map(|v|format!("{} = ",v.display_arm64_with_aliases(reg_aliases))).unwrap_or_default(),lhs.display_arm64_with_aliases(reg_aliases),rhs.display_arm64_with_aliases(reg_aliases),addend.display_arm64_with_aliases(reg_aliases))),
                 PcodeOp::MultiplyAdd {dst,lhs,rhs,addend,width,subtract} => out.push_str(&format!("    {}multiply_add_u{width}({}, {}, {}, subtract={subtract}); // wrapping integer arithmetic; NZCV preserved\n",dst.map(|v|format!("{} = ",v.display_arm64_with_aliases(reg_aliases))).unwrap_or_default(),lhs.display_arm64_with_aliases(reg_aliases),rhs.display_arm64_with_aliases(reg_aliases),addend.display_arm64_with_aliases(reg_aliases))),
                 PcodeOp::Logical { dst, lhs, rhs, op, invert, shift, amount, width, set_flags } => {
                     let result = format!("logical_{op:?}_u{width}({}, {}, invert={invert}, shift={shift:?}, amount={amount})", lhs.display_arm64_with_aliases(reg_aliases), rhs.display_arm64_with_aliases(reg_aliases));
