@@ -1,6 +1,4 @@
-use ghidra_hopper_rs::ghidra_port::{
-    GhidraJumpTable, GhidraProgram, HopperHybridObjcAnalyzerRs,
-};
+use ghidra_hopper_rs::ghidra_port::{GhidraJumpTable, GhidraProgram, HopperHybridObjcAnalyzerRs};
 use ghidra_hopper_rs::macho_objc::MachOImage;
 use ghidra_hopper_rs::mcp_server;
 use ghidra_hopper_rs::segment::{demangle_symbol, OperandFormat, OperandFormatKind, Segment, Tag};
@@ -62,37 +60,91 @@ fn build_demo_ghidra_program() -> (GhidraProgram, Vec<GhidraJumpTable>) {
     (prog, vec![jump_table])
 }
 
+fn fail(message: impl std::fmt::Display) -> ! {
+    eprintln!("Error: {message}");
+    std::process::exit(1)
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mode = args.get(1).map(String::as_str).unwrap_or("demo");
+    if !matches!(mode, "demo" | "inspect" | "decompile" | "mcp") {
+        fail("Usage: ghidra-hopper-rs <inspect|decompile|demo|mcp>");
+    }
+    if mode == "inspect" || (mode == "demo" && args.get(2).is_some()) {
+        let path = args
+            .get(2)
+            .unwrap_or_else(|| fail("inspect requires a binary path"));
+        let bytes = fs::read(path).unwrap_or_else(|err| fail(err));
+        let image = MachOImage::parse(&bytes).unwrap_or_else(|err| fail(err));
+        println!(
+            "{}",
+            serde_json::json!({"path":path,"architecture":image.selected_arch,"entry_point":image.entry_point,"segments":image.segments.len(),"objc_stubs_verified":image.objc.selector_stubs.len(),"status":"metadata_only","decompilation_performed":false})
+        );
+        return;
+    }
 
     if mode == "mcp" {
-        let summary = r#"{"engine":"ghidra-hopper-rs","version":"0.3.0","rea_mcp":"6.8.0","ghidra":"12.3_DEV (4718f50d99)","hopper":"6.6.0 (42.6316032)","frontier_agents_configured":15,"status":"ready","ported_analyzers":["ObjcMessageAnalyzer","DecompilerSwitchAnalysisCmd","HopperHybridObjcAnalyzer","HopperInteractiveByteState","HopperSwiftDemangler","HopperRegisterAliasEngine"]}"#;
-        let _ = mcp_server::run_stdio_mcp_loop(summary);
+        let summary = r#"{"engine":"ghidra-hopper-rs","version":"0.3.0","status":"no_document_loaded","provider_health":"not_checked","engine_scope":"partial_arm64","full_ssa_decompiler":false,"document_mutation":false}"#;
+        if let Err(err) = mcp_server::run_stdio_mcp_loop(summary) {
+            eprintln!("MCP transport error: {err}");
+            std::process::exit(1);
+        }
         return;
     }
 
     if mode == "decompile" {
         let target_path = args
             .get(2)
-            .expect("Usage: ghidra-hopper-rs decompile <binary> <func_name> <addr_hex> [max_insns]");
+            .unwrap_or_else(|| fail("decompile requires a binary path"));
         let func_name = args.get(3).map(String::as_str).unwrap_or("entry");
         let addr_str = args
             .get(4)
             .map(String::as_str)
             .unwrap_or("0x100000000")
             .trim_start_matches("0x");
-        let entry_addr = u64::from_str_radix(addr_str, 16).unwrap_or(0x100000000);
+        let requested_entry = args.get(4).map(|_| {
+            u64::from_str_radix(addr_str, 16)
+                .unwrap_or_else(|_| fail("Invalid hexadecimal function address"))
+        });
         let max_insns: usize = args
             .get(5)
-            .and_then(|s| s.parse().ok())
+            .map(|s| {
+                s.parse()
+                    .unwrap_or_else(|_| fail("Invalid instruction budget"))
+            })
             .unwrap_or(16);
+        if max_insns == 0 {
+            fail("Instruction budget must be positive");
+        }
 
         let start_time = Instant::now();
-        let raw_file = fs::read(target_path).expect("Failed to read binary");
-        let img = MachOImage::parse(&raw_file).expect("Failed to parse Mach-O");
+        let raw_file = fs::read(target_path).unwrap_or_else(|err| fail(err));
+        let img = MachOImage::parse(&raw_file).unwrap_or_else(|err| fail(err));
+        let entry_addr = requested_entry
+            .or(img.entry_point)
+            .unwrap_or_else(|| fail("Binary has no entry point; provide an explicit address"));
+        if img.selected_arch != "arm64" {
+            eprintln!(
+                "Decompilation supports ARM64 only; selected architecture is {}",
+                img.selected_arch
+            );
+            std::process::exit(1);
+        }
         let mut prog = GhidraProgram::from_macho_image(target_path, &img);
-        if let Some(seg) = prog.text_segment_mut() {
+        if prog
+            .segment_at(entry_addr)
+            .and_then(|seg| seg.read_bytes(entry_addr, 4))
+            .is_none()
+            || !entry_addr.is_multiple_of(4)
+        {
+            eprintln!(
+                "Function entry 0x{:x} is unaligned or outside loaded segments",
+                entry_addr
+            );
+            std::process::exit(1);
+        }
+        if let Some(seg) = prog.segment_at_mut(entry_addr) {
             seg.scan_ascii_strings(4);
         }
 
@@ -100,11 +152,13 @@ fn main() {
         let mut proc =
             analyzer.analyze_function_zero_ipc(&mut prog, func_name, entry_addr, max_insns, &[]);
         if let Some(first_bb) = proc.basic_blocks.first_mut() {
-            first_bb.tags.insert(Tag::new("real-binary-target", "#FF6B6B"));
+            first_bb
+                .tags
+                .insert(Tag::new("real-binary-target", "#FF6B6B"));
         }
 
         println!("╔════════════════════════════════════════════════════════════════════════╗");
-        println!("║  ghidra-hopper-rs Real-Target Zero-IPC Decompilation (v0.3.0)          ║");
+        println!("║  ghidra-hopper-rs Partial ARM64 Analysis (v0.3.0)                     ║");
         println!("╚════════════════════════════════════════════════════════════════════════╝");
         println!("Target Binary   : {}", target_path);
         println!(
@@ -113,11 +167,26 @@ fn main() {
             img.is_universal,
             img.slices.len()
         );
-        println!("Entry Point     : {:?}", img.entry_point.map(|e| format!("0x{:x}", e)));
+        println!(
+            "Entry Point     : {:?}",
+            img.entry_point.map(|e| format!("0x{:x}", e))
+        );
         println!("Segments        : {}", prog.segments.len());
         println!("ObjC Classes    : {:?}", img.objc.class_names);
-        println!("ObjC Selectors  : {} indexed in SymbolTable", prog.objc_stub_selectors.len());
-        println!("Procedure       : {} @ 0x{:x} ({} insns)", func_name, entry_addr, max_insns);
+        println!(
+            "ObjC Selectors  : {} indexed in SymbolTable",
+            prog.objc_stub_selectors.len()
+        );
+        println!(
+            "Procedure       : {} @ 0x{:x} ({} decoded; budget {})",
+            func_name,
+            entry_addr,
+            proc.basic_blocks
+                .iter()
+                .map(|bb| bb.instructions.len())
+                .sum::<usize>(),
+            max_insns
+        );
         println!("Discovered ObjC : {:?}", analyzer.discovered_messages);
         println!("Ghidra Refs     : {}", prog.references.len());
         for r in &prog.references {
@@ -133,57 +202,22 @@ fn main() {
                 bm.address, bm.bookmark_type, bm.category, bm.comment
             );
         }
-        if let Some(seg) = prog.text_segment() {
+        if let Some(seg) = prog.segment_at(entry_addr) {
             println!("\n{}", proc.render_four_modes(seg));
         }
         println!("Elapsed         : {:.3?}", start_time.elapsed());
+        if proc.is_incomplete() {
+            std::process::exit(2);
+        }
         return;
     }
 
     let start_time = Instant::now();
+    println!("SYNTHETIC DEMO ONLY: no real binary is analyzed below");
     println!("╔════════════════════════════════════════════════════════════════════════╗");
     println!("║  Ghidra 12.3_DEV + Hopper 6.6.0 Hybrid Engine (ghidra-hopper-rs v0.3.0)║");
     println!("║  Synced: Ghidra 4718f50d99 | Hopper 42.6316032 | REA 6.8.0 (15 Agents) ║");
     println!("╚════════════════════════════════════════════════════════════════════════╝");
-
-    let default_hopper_bin = "/Applications/Hopper Disassembler.app/Contents/MacOS/Hopper Disassembler";
-    let target_path = args.get(2).map(String::as_str).unwrap_or(default_hopper_bin);
-
-    if let Ok(raw_file) = fs::read(target_path) {
-        let t0 = Instant::now();
-        match MachOImage::parse(&raw_file) {
-            Ok(img) => {
-                let ghidra_prog = GhidraProgram::from_macho_image("Hopper.app", &img);
-                let elapsed = t0.elapsed();
-                println!(
-                    "\n[1] Zero-Copy Rust Mach-O -> GhidraProgram Loader: `{}`",
-                    target_path
-                );
-                println!(
-                    "    - Universal Binary : {} ({} slices, selected `{}`)",
-                    img.is_universal,
-                    img.slices.len(),
-                    img.selected_arch
-                );
-                println!(
-                    "    - Entry Point      : {:?}",
-                    img.entry_point.map(|e| format!("0x{:x}", e))
-                );
-                println!("    - Segments Loaded  : {}", ghidra_prog.segments.len());
-                println!(
-                    "    - ObjC Classes     : {} {:?}",
-                    img.objc.class_names.len(),
-                    &img.objc.class_names[..img.objc.class_names.len().min(6)]
-                );
-                println!(
-                    "    - ObjC Stubs Bound : {} stubs pre-indexed in SymbolTable (Zero-IPC)",
-                    ghidra_prog.objc_stub_selectors.len()
-                );
-                println!("    - Load Latency     : {:.3?}", elapsed);
-            }
-            Err(e) => println!("    [!] Mach-O parse note: {}", e),
-        }
-    }
 
     // 2. Execute the Rust-ported Ghidra `HopperHybridObjcAnalyzerRs` + `GhidraJumpTable`
     println!(
@@ -200,7 +234,9 @@ fn main() {
     );
 
     if let Some(first_bb) = proc.basic_blocks.first_mut() {
-        first_bb.tags.insert(Tag::new("entry-objc-bridge", "#FF6B6B"));
+        first_bb
+            .tags
+            .insert(Tag::new("entry-objc-bridge", "#FF6B6B"));
     }
     // Hopper `renameRegister` + Objective-C ABI (`x0 -> self`, `x1 -> _cmd`, `x3 -> dispatchIndex`)
     proc.rename_register(3, "dispatchIndex");
@@ -271,13 +307,12 @@ mod tests {
         assert_eq!(analyzer.discovered_messages.len(), 1);
         assert_eq!(
             prog.eol_comments.get(&0x10000000c).map(String::as_str),
-            Some("[HopperGhidraBridge initWithUTF8String:@\"Hopper+Ghidra Rust Engine\"]")
+            Some("[x0 initWithUTF8String:\"Hopper+Ghidra Rust Engine\"]")
         );
         assert!(prog
             .references
             .iter()
-            .any(|r| r.from_addr == 0x10000000c
-                && r.ref_type == GhidraRefType::CallOverrideUnconditional));
+            .any(|r| r.from_addr == 0x10000000c && r.ref_type == GhidraRefType::UnconditionalCall));
 
         // Verify DecompilerSwitchAnalysisCmd JumpTable port created COMPUTED_JUMP references
         let computed_jumps: Vec<_> = prog
@@ -308,8 +343,14 @@ mod tests {
         proc.rename_register(3, "dispatchIndex");
 
         // Verify Objective-C ABI auto-aliasing (`x0 -> self`, `x1 -> _cmd`) + custom `x3 -> dispatchIndex`
-        assert_eq!(proc.register_renames.get(&0).map(String::as_str), Some("self"));
-        assert_eq!(proc.register_renames.get(&1).map(String::as_str), Some("_cmd"));
+        assert_eq!(
+            proc.register_renames.get(&0).map(String::as_str),
+            Some("self")
+        );
+        assert_eq!(
+            proc.register_renames.get(&1).map(String::as_str),
+            Some("_cmd")
+        );
         assert_eq!(
             proc.register_renames.get(&3).map(String::as_str),
             Some("dispatchIndex")
@@ -317,7 +358,9 @@ mod tests {
 
         let seg = prog.text_segment_mut().unwrap();
         let rendered = proc.render_four_modes(seg);
-        assert!(rendered.contains("self = [self initWithUTF8String:@\"Hopper+Ghidra Rust Engine\"];"));
+        assert!(
+            rendered.contains("self = [self initWithUTF8String:\"Hopper+Ghidra Rust Engine\"];")
+        );
         assert!(rendered.contains("switch (dispatchIndex)"));
 
         // Verify Hopper Interactive Hotkeys ('U' Undefine on trailing byte -> clears entire 4-byte instruction, then 'P' Procedure)

@@ -87,7 +87,7 @@ impl GhidraJumpTable {
             );
             let case_label = format!("switchD_{:x}::caseD_{}", self.switch_address, idx);
             prog.symbol_table.insert(dest, case_label);
-            if let Some(seg) = prog.text_segment_mut() {
+            if let Some(seg) = prog.segment_at_mut(self.switch_address) {
                 seg.add_reference(self.switch_address, dest);
             }
         }
@@ -140,6 +140,8 @@ impl Default for ObjcDataTypes {
 /// Unified Rust representation of Ghidra's `ProgramDB` + Hopper's `Document`.
 #[derive(Debug, Clone)]
 pub struct GhidraProgram {
+    pub macho_imports: BTreeMap<u64, crate::macho_objc::MachOImportBinding>,
+    pub plt_bindings: BTreeMap<u64, crate::macho_objc::PltBinding>,
     pub name: String,
     pub segments: Vec<Segment>,
     pub symbol_table: BTreeMap<u64, String>,
@@ -150,12 +152,13 @@ pub struct GhidraProgram {
     pub objc_stub_selectors: BTreeMap<u64, String>,
     pub switch_hints: SwitchHintTable,
     pub data_types: ObjcDataTypes,
-    next_external_addr: u64,
 }
 
 impl GhidraProgram {
     pub fn new(name: impl Into<String>, text_seg: Segment) -> Self {
         Self {
+            macho_imports: BTreeMap::new(),
+            plt_bindings: BTreeMap::new(),
             name: name.into(),
             segments: vec![text_seg],
             symbol_table: BTreeMap::new(),
@@ -166,12 +169,13 @@ impl GhidraProgram {
             objc_stub_selectors: BTreeMap::new(),
             switch_hints: SwitchHintTable::default(),
             data_types: ObjcDataTypes::default(),
-            next_external_addr: 0x2000_0000_0000,
         }
     }
 
     pub fn from_macho_image(name: impl Into<String>, img: &MachOImage) -> Self {
         let mut prog = Self {
+            macho_imports: img.objc.macho_imports.clone(),
+            plt_bindings: img.objc.plt_bindings.clone(),
             name: name.into(),
             segments: img.segments.clone(),
             symbol_table: BTreeMap::new(),
@@ -182,13 +186,28 @@ impl GhidraProgram {
             objc_stub_selectors: img.objc.selector_stubs.clone(),
             switch_hints: SwitchHintTable::default(),
             data_types: ObjcDataTypes::default(),
-            next_external_addr: 0x2000_0000_0000,
         };
         for (&stub_addr, sel) in &prog.objc_stub_selectors {
             prog.symbol_table
                 .insert(stub_addr, format!("objc_msgSend${}", sel));
         }
+        prog.symbol_table.extend(img.objc.symbols.clone());
+        for seg in &mut prog.segments {
+            for (&addr, name) in &prog.symbol_table {
+                if seg.contains(addr) {
+                    seg.set_name_at_address(addr, name.clone());
+                }
+            }
+        }
         prog
+    }
+
+    pub fn segment_at(&self, addr: u64) -> Option<&Segment> {
+        self.segments.iter().find(|seg| seg.contains(addr))
+    }
+
+    pub fn segment_at_mut(&mut self, addr: u64) -> Option<&mut Segment> {
+        self.segments.iter_mut().find(|seg| seg.contains(addr))
     }
 
     pub fn text_segment(&self) -> Option<&Segment> {
@@ -259,10 +278,106 @@ impl HopperHybridObjcAnalyzerRs {
         let hints = prog.switch_hints.clone();
         let mut proc = {
             let seg = prog
-                .text_segment_mut()
-                .expect("GhidraProgram must have a __TEXT segment");
+                .segment_at_mut(entry_addr)
+                .expect("Function entry must be in a loaded segment");
             Procedure::analyze_arm64(func_name, entry_addr, max_insns, seg, &stubs, &hints)
         };
+        for bb in &mut proc.basic_blocks {
+            let decoded_addresses: std::collections::BTreeSet<_> =
+                bb.instructions.iter().map(|i| i.address).collect();
+            let decoded_words: BTreeMap<_, _> = bb
+                .instructions
+                .iter()
+                .map(|i| (i.address, u32::from_le_bytes(i.bytes)))
+                .collect();
+            for insn in &mut bb.instructions {
+                if let Some(binding) = prog.macho_imports.get(&insn.address).cloned() {
+                    // Entering at LDR/BR, an explicit switch override, or changed
+                    // code cannot inherit an import proven for the full stub.
+                    let full_stub = binding.instructions.iter().enumerate().all(|(n, word)| {
+                        decoded_words.get(&(binding.stub_address + n as u64 * 4)) == Some(word)
+                    });
+                    if full_stub
+                        && matches!(insn.pcode.first(), Some(crate::pcode_sleigh::PcodeOp::BranchInd { target_reg, switch_targets }) if target_reg.offset == 16 && switch_targets.is_empty())
+                    {
+                        insn.pcode = vec![crate::pcode_sleigh::PcodeOp::MachOImportTailCall {
+                            symbol: binding.symbol.clone(),
+                            library: binding.library.clone(),
+                            pointer_address: binding.pointer_address,
+                        }];
+                        prog.add_memory_reference(
+                            insn.address,
+                            binding.pointer_address,
+                            GhidraRefType::Data,
+                            GhidraSourceType::Analysis,
+                            0,
+                        );
+                        prog.eol_comments.insert(
+                            insn.address,
+                            format!(
+                                "Mach-O import {} from {} via slot 0x{:x}; runtime address unknown",
+                                binding.symbol, binding.library, binding.pointer_address
+                            ),
+                        );
+                    }
+                }
+                if let Some(crate::pcode_sleigh::PcodeOp::TableBranch {
+                    table_address,
+                    targets,
+                    ..
+                }) = insn.pcode.first()
+                {
+                    for target in targets
+                        .iter()
+                        .copied()
+                        .collect::<std::collections::BTreeSet<_>>()
+                    {
+                        prog.add_memory_reference(
+                            insn.address,
+                            target,
+                            GhidraRefType::ComputedJump,
+                            GhidraSourceType::Analysis,
+                            0,
+                        );
+                    }
+                    prog.add_memory_reference(
+                        insn.address,
+                        *table_address,
+                        GhidraRefType::Data,
+                        GhidraSourceType::Analysis,
+                        0,
+                    );
+                    prog.eol_comments.insert(insn.address, format!("Verified u16 relative table at 0x{table_address:x}: {} entries, scale 4", targets.len()));
+                }
+                if let Some(binding) = prog.plt_bindings.get(&insn.address).cloned() {
+                    if !(0..4).all(|i| decoded_addresses.contains(&(binding.stub_address + i * 4)))
+                    {
+                        continue;
+                    }
+                    if matches!(insn.pcode.first(),Some(crate::pcode_sleigh::PcodeOp::BranchInd{target_reg,..}) if target_reg.offset==17)
+                    {
+                        insn.pcode = vec![crate::pcode_sleigh::PcodeOp::ExternalTailCall {
+                            symbol: binding.symbol.clone(),
+                            got_address: binding.got_address,
+                        }];
+                        prog.add_memory_reference(
+                            insn.address,
+                            binding.got_address,
+                            GhidraRefType::Data,
+                            GhidraSourceType::Analysis,
+                            0,
+                        );
+                        prog.eol_comments.insert(
+                            insn.address,
+                            format!(
+                                "JUMP_SLOT {} via GOT 0x{:x}; runtime address unknown",
+                                binding.symbol, binding.got_address
+                            ),
+                        );
+                    }
+                }
+            }
+        }
 
         // 3. Scan lifted P-Code ops in-memory (Zero-IPC!) to resolve ObjcMessage calls
         //    (replaces Ghidra's slow ParallelDecompiler IPC callback in ObjcMessageAnalyzer.java)
@@ -270,44 +385,112 @@ impl HopperHybridObjcAnalyzerRs {
         let mut reg_consts: BTreeMap<u64, u64> = BTreeMap::new();
         let mut pending_messages = Vec::new();
 
-        if let Some(seg) = prog.text_segment() {
+        if let Some(seg) = prog.segment_at(entry_addr) {
             for bb in &proc.basic_blocks {
+                // A linear scan is not a dataflow merge. Do not propagate values from
+                // one branch into a different path or through unknown instructions.
+                reg_strings.clear();
+                reg_consts.clear();
                 for insn in &bb.instructions {
+                    if insn.mnemonic == "inst.arm64" {
+                        reg_strings.clear();
+                        reg_consts.clear();
+                    }
                     for op in &insn.pcode {
                         match op {
+                            crate::pcode_sleigh::PcodeOp::ShiftedAdd { dst: Some(dst), .. } => {
+                                reg_consts.remove(&dst.offset);
+                                reg_strings.remove(&dst.offset);
+                            }
+                            crate::pcode_sleigh::PcodeOp::IntOr { dst, .. } => {
+                                if dst.space == crate::pcode_sleigh::SpaceKind::Register {
+                                    reg_consts.remove(&dst.offset);
+                                    reg_strings.remove(&dst.offset);
+                                }
+                            }
+                            crate::pcode_sleigh::PcodeOp::FlagArithmetic {
+                                dst: Some(dst), ..
+                            } => {
+                                reg_consts.remove(&dst.offset);
+                                reg_strings.remove(&dst.offset);
+                            }
+                            crate::pcode_sleigh::PcodeOp::Bitfield { dst, .. } => {
+                                if dst.space == crate::pcode_sleigh::SpaceKind::Register {
+                                    reg_consts.remove(&dst.offset);
+                                    reg_strings.remove(&dst.offset);
+                                }
+                            }
                             crate::pcode_sleigh::PcodeOp::Copy { dst, src } => {
-                                if dst.space == crate::pcode_sleigh::SpaceKind::Register
-                                    && src.space == crate::pcode_sleigh::SpaceKind::Constant
-                                {
-                                    reg_consts.insert(dst.offset, src.offset);
+                                if dst.space == crate::pcode_sleigh::SpaceKind::Register {
+                                    let value = if src.space
+                                        == crate::pcode_sleigh::SpaceKind::Constant
+                                    {
+                                        Some(src.offset)
+                                    } else if src.space == crate::pcode_sleigh::SpaceKind::Register
+                                    {
+                                        reg_consts.get(&src.offset).copied()
+                                    } else {
+                                        None
+                                    };
+                                    reg_consts.remove(&dst.offset);
+                                    if let Some(value) = value.map(|value| {
+                                        value
+                                            & if dst.size == 4 {
+                                                u32::MAX as u64
+                                            } else {
+                                                u64::MAX
+                                            }
+                                    }) {
+                                        reg_consts.insert(dst.offset, value);
+                                    }
+                                    reg_strings.remove(&dst.offset);
                                 }
                             }
                             crate::pcode_sleigh::PcodeOp::IntAdd { dst, lhs, rhs } => {
-                                if let Some(&base) = reg_consts.get(&lhs.offset) {
-                                    let target = base.wrapping_add(rhs.offset);
+                                if dst.space != crate::pcode_sleigh::SpaceKind::Register {
+                                    continue;
+                                }
+                                let previous = reg_consts.get(&lhs.offset).copied();
+                                reg_consts.remove(&dst.offset);
+                                reg_strings.remove(&dst.offset);
+                                if let Some(base) = previous.filter(|_| {
+                                    lhs.space == crate::pcode_sleigh::SpaceKind::Register
+                                        && rhs.space == crate::pcode_sleigh::SpaceKind::Constant
+                                }) {
+                                    let target = base.wrapping_add(rhs.offset)
+                                        & if dst.size == 4 {
+                                            u32::MAX as u64
+                                        } else {
+                                            u64::MAX
+                                        };
                                     reg_consts.insert(dst.offset, target);
-                                    if let Some(bytes) = seg.read_bytes(target, 64) {
-                                        if let Some(end) = bytes.iter().position(|&b| b == 0) {
-                                            if end > 0 {
-                                                let s =
-                                                    String::from_utf8_lossy(&bytes[..end]).into();
-                                                reg_strings.insert(dst.offset, s);
-                                            }
-                                        }
+                                    if let Some(s) = crate::pcode_sleigh::read_ascii_at(seg, target)
+                                    {
+                                        reg_strings.insert(dst.offset, s);
                                     }
+                                }
+                            }
+                            crate::pcode_sleigh::PcodeOp::Load { dst, .. }
+                            | crate::pcode_sleigh::PcodeOp::ZeroExtend { dst, .. } => {
+                                if dst.space == crate::pcode_sleigh::SpaceKind::Register {
+                                    reg_consts.remove(&dst.offset);
+                                    reg_strings.remove(&dst.offset);
                                 }
                             }
                             crate::pcode_sleigh::PcodeOp::CallObjC {
                                 stub_addr,
                                 selector,
                             } => {
-                                let receiver = reg_strings
-                                    .get(&0)
-                                    .cloned()
-                                    .unwrap_or_else(|| "HopperGhidraBridge".to_string());
+                                let receiver =
+                                    if func_name.starts_with("-[") || func_name.starts_with("+[") {
+                                        "self"
+                                    } else {
+                                        "x0"
+                                    }
+                                    .to_string();
                                 let arg = reg_strings
                                     .get(&2)
-                                    .map(|s| format!("@\"{}\"", s))
+                                    .map(|s| format!("{s:?}"))
                                     .unwrap_or_else(|| "x2".to_string());
                                 pending_messages.push(ObjcMessage {
                                     receiver,
@@ -315,11 +498,31 @@ impl HopperHybridObjcAnalyzerRs {
                                     function_entry: entry_addr,
                                     call_addr: insn.address,
                                     stub_target: *stub_addr,
-                                    parameters: vec![arg],
+                                    parameters: (0..selector.matches(':').count())
+                                        .map(|i| {
+                                            if i == 0 {
+                                                arg.clone()
+                                            } else if i < 6 {
+                                                format!("x{}", i + 2)
+                                            } else {
+                                                format!("unknown_stack_arg_{i}")
+                                            }
+                                        })
+                                        .collect(),
                                 });
                             }
                             _ => {}
                         }
+                    }
+                    if insn.is_call {
+                        reg_consts.retain(|reg, _| *reg > 18);
+                        reg_strings.retain(|reg, _| *reg > 18);
+                    }
+                    if let Some(crate::pcode_sleigh::PcodeOp::IntSub { dst, .. }) =
+                        insn.pcode.first()
+                    {
+                        reg_consts.remove(&dst.offset);
+                        reg_strings.remove(&dst.offset);
                     }
                 }
             }
@@ -327,7 +530,6 @@ impl HopperHybridObjcAnalyzerRs {
 
         // 4. Port of `updateExternalBlock` + `setCommentAndReference` in `ObjcMessageAnalyzer.java`
         for msg in pending_messages {
-            self.update_external_block(prog, &msg);
             self.set_comment_and_reference(prog, &msg);
             self.discovered_messages.push(msg);
         }
@@ -341,32 +543,21 @@ impl HopperHybridObjcAnalyzerRs {
         proc
     }
 
-    /// Port of `ObjcMessageAnalyzer.updateExternalBlock(Program, Message, MessageLog)`.
-    fn update_external_block(&self, prog: &mut GhidraProgram, msg: &ObjcMessage) -> u64 {
-        let key = (msg.receiver.clone(), msg.selector.clone());
-        if let Some(&existing) = prog.external_methods.get(&key) {
-            return existing;
-        }
-        let ext_addr = prog.next_external_addr;
-        prog.next_external_addr += prog.data_types.ptr_size as u64;
-        prog.external_methods.insert(key, ext_addr);
-        prog.symbol_table.insert(
-            ext_addr,
-            format!("-[{} {}]", msg.receiver, msg.selector),
-        );
-        ext_addr
-    }
-
     /// Port of `ObjcMessageAnalyzer.setCommentAndReference(Program, Message, List<String>, MessageLog)`.
     fn set_comment_and_reference(&self, prog: &mut GhidraProgram, msg: &ObjcMessage) {
         let key = (msg.receiver.clone(), msg.selector.clone());
-        let target_addr = prog
+        let known_target = prog
             .external_methods
             .get(&key)
             .copied()
-            .unwrap_or(msg.stub_target);
+            .filter(|addr| prog.segment_at(*addr).is_some());
+        let target_addr = if self.use_call_overrides {
+            known_target.unwrap_or(msg.stub_target)
+        } else {
+            msg.stub_target
+        };
 
-        let ref_type = if self.use_call_overrides {
+        let ref_type = if self.use_call_overrides && known_target.is_some() {
             GhidraRefType::CallOverrideUnconditional
         } else {
             GhidraRefType::UnconditionalCall
@@ -407,7 +598,7 @@ impl HopperHybridObjcAnalyzerRs {
 
         prog.eol_comments
             .insert(msg.call_addr, formatted_comment.clone());
-        if let Some(seg) = prog.text_segment_mut() {
+        if let Some(seg) = prog.segment_at_mut(msg.call_addr) {
             seg.inline_comments
                 .insert(msg.call_addr, formatted_comment.clone());
         }
@@ -421,7 +612,7 @@ impl HopperHybridObjcAnalyzerRs {
 
     /// Port of `HopperHybridObjcAnalyzer.buildHopperByteStateForBlock`.
     pub fn verify_byte_state_slice(prog: &GhidraProgram, addr: u64, count: usize) -> Vec<ByteType> {
-        let Some(seg) = prog.text_segment() else {
+        let Some(seg) = prog.segment_at(addr) else {
             return Vec::new();
         };
         (0..count)

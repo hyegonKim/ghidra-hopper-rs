@@ -41,36 +41,109 @@ impl Procedure {
         let proc_name = name.into();
         seg.set_name_at_address(entry_address, proc_name.clone());
 
-        let mut decoded = Vec::new();
-        let mut block_leaders: BTreeSet<u64> = BTreeSet::new();
-        block_leaders.insert(entry_address);
+        let mut decoded = BTreeMap::new();
 
-        let mut cursor = entry_address;
-        for idx in 0..max_instructions {
-            let Some(word) = seg.read_u32_le(cursor) else {
-                break;
-            };
-            let insn = decode_and_lift_arm64(cursor, word, seg, objc_stubs, switch_hints);
+        let mut pending = BTreeSet::from([entry_address]);
+        loop {
+            while decoded.len() < max_instructions {
+                let Some(cursor) = pending.pop_first() else {
+                    break;
+                };
+                if decoded.contains_key(&cursor) || cursor % 4 != 0 {
+                    continue;
+                }
+                let Some(next) = cursor.checked_add(4) else {
+                    continue;
+                };
+                let Some(word) = seg.read_u32_le(cursor) else {
+                    continue;
+                };
+                let insn = decode_and_lift_arm64(cursor, word, seg, objc_stubs, switch_hints);
+                if matches!(
+                    insn.pcode.first(),
+                    Some(crate::pcode_sleigh::PcodeOp::Unsupported { .. })
+                ) {
+                    decoded.insert(cursor, insn);
+                    continue;
+                }
 
-            if idx == 0 {
-                seg.mark_as_procedure(cursor, 4);
-            } else {
-                seg.mark_as_code(cursor, 4);
+                if let Some(crate::pcode_sleigh::PcodeOp::BranchInd { switch_targets, .. }) =
+                    insn.pcode.first()
+                {
+                    for &target in switch_targets {
+                        pending.insert(target);
+                    }
+                } else if !insn.is_call {
+                    if let Some(target) = insn.branch_target {
+                        pending.insert(target);
+                    }
+                }
+                if !insn.is_ret && !insn.is_unconditional_jump {
+                    pending.insert(next);
+                }
+                decoded.insert(cursor, insn);
             }
-
-            if let Some(target) = insn.branch_target {
-                seg.add_reference(cursor, target);
+            // Wait for direct-flow exploration to settle before proving reaching
+            // definitions. Recovered cases share the original instruction budget.
+            if !pending.is_empty() || decoded.len() >= max_instructions {
+                break;
+            }
+            let mut added = false;
+            for (pc, op) in crate::arm64_jump_table::recover(&decoded, entry_address, seg) {
+                let insn = decoded.get_mut(&pc).unwrap();
+                if matches!(
+                    insn.pcode.first(),
+                    Some(crate::pcode_sleigh::PcodeOp::TableBranch { .. })
+                ) {
+                    continue;
+                }
+                if let crate::pcode_sleigh::PcodeOp::TableBranch { targets, .. } = &op {
+                    pending.extend(targets);
+                    insn.branch_target = targets.first().copied();
+                }
+                insn.pcode = vec![op];
+                added = true;
+            }
+            if !added {
+                break;
+            }
+        }
+        crate::arm64_jump_table::validate(&mut decoded, entry_address, seg);
+        // Publish code states, references, and leaders only after late-edge
+        // validation. Duplicate table entries remain cases, but edges are unique.
+        let mut block_leaders = BTreeSet::from([entry_address]);
+        for (&pc, insn) in &decoded {
+            if matches!(
+                insn.pcode.first(),
+                Some(crate::pcode_sleigh::PcodeOp::Unsupported { .. })
+            ) {
+                continue;
+            }
+            if pc == entry_address {
+                seg.mark_as_procedure(pc, 4);
+            } else {
+                seg.mark_as_code(pc, 4);
+            }
+            let indirect_targets = match insn.pcode.first() {
+                Some(crate::pcode_sleigh::PcodeOp::TableBranch { targets, .. }) => Some(targets),
+                Some(crate::pcode_sleigh::PcodeOp::BranchInd { switch_targets, .. }) => {
+                    Some(switch_targets)
+                }
+                _ => None,
+            };
+            if let Some(targets) = indirect_targets {
+                for &target in targets {
+                    block_leaders.insert(target);
+                    seg.add_reference(pc, target);
+                }
+            } else if let Some(target) = insn.branch_target {
+                seg.add_reference(pc, target);
                 if !insn.is_call {
                     block_leaders.insert(target);
-                    block_leaders.insert(cursor + 4);
                 }
             }
-
-            let is_ret = insn.is_ret;
-            decoded.push(insn);
-            cursor += 4;
-            if is_ret {
-                break;
+            if insn.is_ret || insn.is_conditional_jump || insn.is_unconditional_jump {
+                block_leaders.extend(pc.checked_add(4));
             }
         }
 
@@ -79,9 +152,18 @@ impl Procedure {
         let mut current_insns = Vec::new();
         let mut current_start = entry_address;
 
-        for insn in decoded {
-            if !current_insns.is_empty() && block_leaders.contains(&insn.address) {
-                let last_addr = insn.address;
+        for insn in decoded.into_values() {
+            if current_insns.is_empty() {
+                current_start = insn.address;
+            }
+            if !current_insns.is_empty()
+                && (block_leaders.contains(&insn.address)
+                    || current_insns
+                        .last()
+                        .map(|i: &DecodedInstruction| i.address + 4)
+                        != Some(insn.address))
+            {
+                let last_addr = current_insns.last().unwrap().address + 4;
                 let succs = compute_successors(&current_insns, Some(last_addr));
                 basic_blocks.push(BasicBlock {
                     index: basic_blocks.len(),
@@ -101,7 +183,7 @@ impl Procedure {
                 .last()
                 .map(|i| i.address + 4)
                 .unwrap_or(current_start);
-            let succs = compute_successors(&current_insns, None);
+            let succs = compute_successors(&current_insns, Some(end_addr));
             basic_blocks.push(BasicBlock {
                 index: basic_blocks.len(),
                 start_address: current_start,
@@ -132,13 +214,46 @@ impl Procedure {
 
     /// Hopper Objective-C ABI auto-aliasing (`x0 -> self`, `x1 -> _cmd`).
     pub fn apply_objc_abi_aliases(&mut self) {
-        self.register_renames.entry(0).or_insert_with(|| "self".into());
-        self.register_renames.entry(1).or_insert_with(|| "_cmd".into());
+        self.register_renames
+            .entry(0)
+            .or_insert_with(|| "self".into());
+        self.register_renames
+            .entry(1)
+            .or_insert_with(|| "_cmd".into());
     }
 
-    /// Renders Hopper's 4-Mode Unified View (`ASM`, `CFG` + Minimap, `Pseudocode`, `Hex`).
+    pub fn is_incomplete(&self) -> bool {
+        let starts: BTreeSet<_> = self
+            .basic_blocks
+            .iter()
+            .map(|bb| bb.start_address)
+            .collect();
+        self.basic_blocks.is_empty()
+            || self.basic_blocks.iter().any(|bb| {
+                bb.instructions.iter().any(|i| {
+                    matches!(
+                        i.pcode.first(),
+                        Some(crate::pcode_sleigh::PcodeOp::Unsupported { .. })
+                    )
+                }) || bb.successors.iter().any(|target| !starts.contains(target))
+                    || bb.instructions.last().is_some_and(|i| {
+                        i.is_unconditional_jump
+                            && i.branch_target.is_none()
+                            && !matches!(
+                                i.pcode.first(),
+                                Some(
+                                    crate::pcode_sleigh::PcodeOp::ExternalTailCall { .. }
+                                        | crate::pcode_sleigh::PcodeOp::MachOImportTailCall { .. }
+                                )
+                            )
+                    })
+            })
+    }
+
+    /// Renders the partial analysis, with explicit completeness status.
     pub fn render_four_modes(&self, seg: &Segment) -> String {
         let mut out = String::new();
+        out.push_str(if self.is_incomplete() {"Analysis status: INCOMPLETE (unsupported instruction, unresolved edge, or instruction budget)\n"} else {"Analysis status: supported subset only; full semantic equivalence is unverified\n"});
 
         // MODE 1: Assembly View (with ByteType, XREFs, ObjC selectors, and inline comments)
         out.push_str("=== [Mode 1: Hopper Assembly + Byte-State View] ===\n");
@@ -219,7 +334,7 @@ impl Procedure {
         let total_len = self
             .basic_blocks
             .last()
-            .map(|b| (b.end_address - self.entry_address) as usize)
+            .map(|b| b.end_address.saturating_sub(self.entry_address) as usize)
             .unwrap_or(16)
             .min(64);
         if let Some(raw) = seg.read_bytes(self.entry_address, total_len) {
@@ -228,7 +343,13 @@ impl Procedure {
                 let hex_cols: Vec<String> = chunk.iter().map(|b| format!("{:02x}", b)).collect();
                 let ascii_cols: String = chunk
                     .iter()
-                    .map(|&b| if (0x20..=0x7e).contains(&b) { b as char } else { '.' })
+                    .map(|&b| {
+                        if (0x20..=0x7e).contains(&b) {
+                            b as char
+                        } else {
+                            '.'
+                        }
+                    })
                     .collect();
                 out.push_str(&format!(
                     "0x{:09x}  {:<47}  |{}|\n",
@@ -251,9 +372,23 @@ fn compute_successors(insns: &[DecodedInstruction], fallthrough: Option<u64>) ->
     if last.is_ret {
         return out;
     }
+    if matches!(
+        last.pcode.first(),
+        Some(crate::pcode_sleigh::PcodeOp::Unsupported { .. })
+    ) {
+        return out;
+    }
     if let Some(crate::pcode_sleigh::PcodeOp::BranchInd { switch_targets, .. }) = last.pcode.first()
     {
         return switch_targets.clone();
+    }
+    if let Some(crate::pcode_sleigh::PcodeOp::TableBranch { targets, .. }) = last.pcode.first() {
+        return targets
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
     }
     if let Some(target) = last.branch_target {
         if !last.is_call {

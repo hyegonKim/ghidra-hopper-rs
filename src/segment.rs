@@ -174,6 +174,9 @@ pub struct Section {
 #[derive(Debug, Clone)]
 pub struct Segment {
     pub name: String,
+    /// Loader permissions, normalized to read=1, write=2, execute=4.
+    /// Synthetic segments default to unknown.
+    pub permissions: Option<u8>,
     pub start_address: u64,
     pub file_offset: u64,
     pub data: Vec<u8>,
@@ -191,10 +194,16 @@ pub struct Segment {
 }
 
 impl Segment {
-    pub fn new(name: impl Into<String>, start_address: u64, file_offset: u64, bytes: Vec<u8>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        start_address: u64,
+        file_offset: u64,
+        bytes: Vec<u8>,
+    ) -> Self {
         let len = bytes.len();
         Self {
             name: name.into(),
+            permissions: None,
             start_address,
             file_offset,
             data: bytes,
@@ -232,7 +241,8 @@ impl Segment {
     }
 
     pub fn file_offset_for_address(&self, addr: u64) -> Option<u64> {
-        self.offset_of(addr).map(|off| self.file_offset + off as u64)
+        self.offset_of(addr)
+            .and_then(|off| self.file_offset.checked_add(off as u64))
     }
 
     pub fn get_type_at_address(&self, addr: u64) -> ByteType {
@@ -247,7 +257,7 @@ impl Segment {
         let Some(off) = self.offset_of(addr) else {
             return false;
         };
-        if length == 0 || off + length > self.byte_types.len() {
+        if length == 0 || length > self.byte_types.len() - off {
             return false;
         }
         self.byte_types[off] = head_type;
@@ -269,7 +279,7 @@ impl Segment {
         let Some(off) = self.offset_of(addr) else {
             return false;
         };
-        let end = (off + length).min(self.byte_types.len());
+        let end = off.saturating_add(length).min(self.byte_types.len());
         for b in &mut self.byte_types[off..end] {
             *b = ByteType::Undefined;
         }
@@ -281,11 +291,15 @@ impl Segment {
             return None;
         }
         let rem = addr % alignment;
-        let pad = if rem == 0 { 0 } else { (alignment - rem) as usize };
-        if pad > 0 {
-            self.set_type_at_address(addr, pad, ByteType::Align);
+        let pad = if rem == 0 {
+            0
+        } else {
+            (alignment - rem) as usize
+        };
+        if pad > 0 && !self.set_type_at_address(addr, pad, ByteType::Align) {
+            return None;
         }
-        Some(addr + pad as u64)
+        addr.checked_add(pad as u64)
     }
 
     /// Hopper's `nearestBlock` / `getInstructionStart`: walks backward across `TYPE_NEXT` bytes.
@@ -325,7 +339,7 @@ impl Segment {
 
     pub fn read_bytes(&self, addr: u64, len: usize) -> Option<&[u8]> {
         let off = self.offset_of(addr)?;
-        self.data.get(off..off + len)
+        self.data.get(off..off.checked_add(len)?)
     }
 
     pub fn read_u32_le(&self, addr: u64) -> Option<u32> {
@@ -335,7 +349,9 @@ impl Segment {
 
     pub fn read_u64_le(&self, addr: u64) -> Option<u64> {
         let b = self.read_bytes(addr, 8)?;
-        Some(u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
+        Some(u64::from_le_bytes([
+            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+        ]))
     }
 
     /// Live instruction/byte patching (Hopper `writeBytes` + `Assembler.xpc` style).
@@ -452,10 +468,16 @@ pub fn demangle_symbol(sym: &str) -> String {
             if bytes[i].is_ascii_digit() {
                 let mut num = 0usize;
                 while i < bytes.len() && bytes[i].is_ascii_digit() {
-                    num = num * 10 + (bytes[i] - b'0') as usize;
+                    let Some(next) = num
+                        .checked_mul(10)
+                        .and_then(|v| v.checked_add((bytes[i] - b'0') as usize))
+                    else {
+                        return format!("swift::{}", rest);
+                    };
+                    num = next;
                     i += 1;
                 }
-                if num > 0 && i + num <= bytes.len() {
+                if num > 0 && num <= bytes.len() - i {
                     parts.push(String::from_utf8_lossy(&bytes[i..i + num]).to_string());
                     i += num;
                     continue;

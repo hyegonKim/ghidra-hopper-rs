@@ -1,5 +1,33 @@
 # ghidra-hopper-rs (v0.3.0)
 
+> **Mach-O BR x16 import 해석 / 2026-10-31:** canonical ADRP/LDR/BR stub과 포인터 슬롯의 간접 심볼 인덱스, nlist undefined 심볼·라이브러리 ordinal을 대조해 외부 꼬리 호출로 표현합니다. Hopper `0x100003f68`은 슬롯 `0x100008130`을 통한 CoreFoundation의 `_CFRunLoopGetCurrent`로 식별됩니다. 같은 파일·진입점·예산에서 탐색량은 128→128개, 512→512개, 1,124→1,124개이며, 2,048개 예산의 마지막 미해결 분기가 해소되어 종료 코드가 2→0으로 바뀝니다. 출력은 여전히 지원 범위 분석임을 명시하며 외부 함수 본문·런타임 주소·시그니처까지 복원한 것은 아닙니다. 잘못된 연결과 stub 중간 진입은 미해결 상태를 유지합니다.
+
+> **BR 점프 테이블 자동 복원 / 2026-10-31:** CMP/B.HI의 인덱스 범위, ADR·LDRH·shifted ADD·BR의 데이터 흐름, 읽기 전용 테이블과 코드 대상 범위를 검증해 unsigned halfword 상대 테이블을 복원합니다. 중복 항목을 원래 인덱스에 보존하고 CFG 간선·참조는 고유 대상별로 생성하며, 새 역방향 경로가 근거를 깨면 복원을 취소합니다. 같은 Hopper·진입점·예산에서 128개는 128→128개, 512개는 512→512개(예산 상한), 2,048개는 747→1,124개입니다. `BR x9`의 58개 항목·30개 고유 대상을 복원했으며 `BR x16`(`0x100003f68`)은 미해결로 `INCOMPLETE`를 유지합니다.
+
+> **ADD shifted-register 추가 / 2026-10-31:** NZCV를 변경하지 않는 32/64비트 ADD의 LSL/LSR/ASR과 ZR 입력·버리는 목적지, W 결과의 상위 비트 제거를 구현했습니다. 동일 Hopper·진입점·예산 비교에서 128개는 128→128개, 512개는 512→512개(상한), 2,048개는 746→747개입니다. `0x100003260`의 ADD를 통과해 `0x100003264`의 BR x9에 도달하지만 점프 테이블 대상은 아직 미해결이며, 다른 BR x16(`0x100003f68`)도 남아 `INCOMPLETE`를 유지합니다. 네이티브 ARM64 537건과 릴리스 테스트 75개로 검증했습니다.
+
+> **LDRH register-offset 추가 / 2026-10-31:** UXTW/LSL/SXTW/SXTX와 scale #0/#1, SP 베이스·ZR 인덱스·WZR 목적지를 지원합니다. 원래 베이스/인덱스로 주소를 계산한 뒤 2바이트를 읽고 W 목적지에 zero-extend하며 베이스 writeback과 NZCV 변경은 없습니다. 같은 Hopper·진입점·예산 비교에서 128개는 128→128개, 512개는 512→512개(상한), 2,048개는 745→746개입니다. 다음 shifted-register ADD(`0x100003260`)에서 `INCOMPLETE`를 유지하며 점프 테이블 복원까지 완료한 것은 아닙니다.
+
+> **ADR 추가 / 2026-10-31:** 현재 PC와 signed 21비트 바이트 오프셋으로 주소를 만드는 ADR을 구현했습니다. ADRP와 주소 디코딩을 공유하되 페이지 정렬·4KB 스케일 차이를 유지하고, 두 명령의 XZR 목적지를 버리는 쓰기로 처리합니다. 같은 Hopper·진입점·예산 비교에서 128개는 128→128개, 512개는 512→512개(모두 상한), 2,048개는 744→745개입니다. ADR은 통과하며 다음 `LDRH` register-offset(`0x10000325c`)에서 `INCOMPLETE`를 유지합니다. 주소 형성만 구현한 것으로 점프 테이블 복원까지 완료한 것은 아닙니다.
+
+> **TBZ/TBNZ 추가 / 2026-10-31:** 비트 0–63, signed imm14 PC-relative 대상, W/X·ZR 문맥과 NZCV 보존을 구현했습니다. 같은 Hopper·진입점에서 이전/수정본에 같은 예산을 적용하면 128개는 128→128개, 512개는 512→512개(모두 예산 상한), 추가로 양쪽 예산을 2,048개로 맞추면 628→744개까지 탐색합니다. TBZ/TBNZ 중단점은 통과하며 다음 미지원 ADR(`0x100003258`)에서 `INCOMPLETE`를 유지합니다. 이는 실행 경로 길이나 전체 디컴파일 완료를 뜻하지 않습니다.
+
+> **ORR 추가 / 2026-10-31:** 32/64비트 ORR shifted-register(LSL/LSR/ASR/ROR)와 logical-immediate 비트마스크를 구현했습니다. NZCV를 보존하며, register 형식의 ZR과 immediate 목적지의 SP/WSP를 구분합니다. 같은 Hopper·진입점에서 같은 예산으로 비교하면 128개 예산은 128→128개(수정본은 ORR 이후 예산 도달), 512개 예산은 456→512개입니다. 전체 분석 완료는 아니며 TBNZ·ADR 등 미지원 명령에서는 `INCOMPLETE`를 유지합니다.
+
+> **CMP·NZCV·조건 분기 추가 / 2026-10-31:** 32/64비트 CMP/CMN/ADDS/SUBS의 immediate·shifted-register 형태와 N/Z/C/V 산술, A64 조건 코드 16종의 B.cond를 구현했습니다. SP/ZR, carry/no-borrow와 signed overflow를 구분하고, 호출 뒤 NZCV는 미확인으로 무효화합니다. 같은 Hopper·진입점에서 이전/수정본에 동일한 예산을 적용하면 128개 예산은 90→128개, 512개 예산은 90→456개까지 탐색합니다. ORR 등 미지원 명령이 남아 `INCOMPLETE`는 유지합니다. 이는 실제 실행 경로나 전체 의미 복원 완료가 아니라 양쪽 분기 경로를 포함한 정적 탐색 결과입니다.
+
+> **비트필드·ELF PLT 추가 / 2026-10-31:** 32/64비트 UBFM/SBFM/BFM의 회전 마스크, 부호 확장과 목적지 병합을 구현했습니다. ELF PLT는 실제 ADRP/LDR/ADD/BR 코드와 JUMP_SLOT GOT 재배치·심볼 테이블 링크를 검증해 외부 꼬리 호출로 표현합니다. GOT의 파일 초기값을 최종 함수 주소로 해석하지 않습니다. Hopper 탐색은 88→90개로 진행했고 다음 중단점은 CMP입니다. Android 진입 경로는 8개 그대로이며 `__cxa_finalize` 외부 꼬리 호출을 식별해 해당 경로의 종료 코드가 2→0으로 바뀌었습니다. 이는 외부 함수 본문·런타임 주소 복원이나 바이너리 전체 분석 완료를 의미하지 않습니다.
+
+> **ARM64 메모리 명령 추가 / 2026-10-31:** 정수 `STP/LDP`(32/64비트, offset/pre/post-index), `LDR/STR`(unsigned immediate와 signed unscaled/pre/post-index, byte/halfword/word/doubleword), 레지스터 MOV·BLR 및 BTI guard의 IR을 추가했습니다. SIMD, LDPSW, 부호 확장 로드와 제약상 예측 불가능한 중복 레지스터 조합은 미지원 상태를 유지합니다. BTI는 guard 연산으로 보존하며 실행 시 페이지 보호·예외를 시뮬레이션하지 않습니다. 실제 파일에서 같은 128개 명령 예산으로 Hopper는 2→88개, Android ELF는 1→8개 명령까지 진행했습니다. 두 파일의 완전 분석은 아니며 미지원 명령 또는 미해결 간접 분기에서는 `INCOMPLETE`를 유지합니다.
+
+> **추가 심층 수정:** 미지원 명령과 NZCV 조건은 `NOP` 또는 가짜 레지스터로 변환하지 않고 `INCOMPLETE`로 표시하며 해당 탐색 경로를 중단합니다. CLI 종료 코드는 지원 범위의 분석 0, 입력 오류 1, 불완전 분석 2입니다. `inspect <binary>`는 메타데이터만 출력하며, `demo <binary>`도 이 동작으로 연결됩니다. 인자 없는 `demo`만 명시적인 합성 예제입니다. 잘못된 주소·명령 예산·파일 경로는 기본값이나 합성 예제로 대체하지 않습니다. Objective-C 수신자와 외부 주소를 임의로 만들지 않으며 원시 문자열을 NSString으로 추정하지 않습니다. MCP 상태는 문서 미로드·공급자 상태 미확인을 반환하고 Swift 도구는 부분 식별자 추출임을 명시합니다.
+
+> **2026-10-31 수정 및 지원 범위:** 이 저장소는 일부 ARM64 명령과 Ghidra/Hopper 스타일 자료구조를 구현한 실험 엔진입니다. 전체 SLEIGH 명세, SSA 분석, Ghidra/Hopper 디컴파일러의 동등한 Rust 포팅은 아닙니다. 세그먼트는 메모리에 복사합니다. 아래의 과거 데모 로그와 성능·동등성 표현은 검증된 기능 보증이 아닙니다.
+>
+> 현재 `decompile`은 ARM64만 허용합니다. Objective-C selref는 실제 포인터로 검증하고, ARM64 32바이트 스텁은 인식한 ADRP/LDR 패턴만 연결합니다. dyld chained fixup 해석과 x86 Objective-C 스텁 복원은 지원하지 않습니다. 미확인 선택자는 추측하지 않습니다.
+>
+> MCP는 `binary_overview`, `provider_status`, `demangle_swift`만 제공합니다. 문서를 로드하지 않은 상태에서 `decompile_objc`, `set_byte_state`, `rename_register`가 성공한 것처럼 응답하던 동작은 제거했습니다. 상태 응답의 공급자 버전은 설정값이며 실시간 상태 검사가 아닙니다. `tools/call` 결과는 MCP `content` 배열 형식으로 변경되었습니다. Rust API의 `ObjCMetadata`는 `selector_references`와 일반 ELF `symbols`를 별도 필드로 제공합니다.
+
 **Rust-Native Reverse Engineering Engine** combining **Ghidra 12.3_DEV (`4718f50d99`, 2026-10-31)** (`SLEIGH` / `P-Code` SSA Decompiler, `ObjcMessageAnalyzer`, `DecompilerSwitchAnalysisCmd`, `JumpTable`, `ReferenceManager`, `BookmarkManager`) with **Hopper Disassembler 6.6.0 (`42.6316032`)** and **REA 6.8.0 (`v49` skill, 229 tools, 15 Frontier Agents configured)** (O(1) `ByteType` Reactive State Machine & `C/P/A/D/U` Interactive Hotkeys, Zero-IPC `__objc_stubs` / `__objc_selrefs` `CALL_OBJC` Recovery, Swift 5 `$s` Demangler, Objective-C `self`/`_cmd` Register Aliasing, `SwitchHintTable` Indirect Branch Override, 4-Mode Unified View `[ASM | CFG | Pseudocode | Hex]`, and Built-in STDIO MCP Server).
 
 ---

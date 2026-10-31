@@ -4,6 +4,9 @@ version = "0.3.0"
 edition = "2021"
 description = "Rust-native Reverse Engineering Engine combining Ghidra P-Code/Decompiler with Hopper Disassembler's Byte-State Machine, ObjC/Swift Recovery, 4-Mode CFG, and MCP Server"
 
+[dependencies]
+serde_json = "1"
+
 [[bin]]
 name = "ghidra-hopper-rs"
 path = "src/main.rs"

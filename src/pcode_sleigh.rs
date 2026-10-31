@@ -62,9 +62,9 @@ impl Varnode {
     pub fn display_arm64(&self) -> String {
         match self.space {
             SpaceKind::Register => match self.offset {
-                31 => "sp".to_string(),
-                30 => "lr".to_string(),
-                29 => "fp".to_string(),
+                31 => if self.size == 4 { "wsp" } else { "sp" }.to_string(),
+                30 if self.size == 8 => "lr".to_string(),
+                29 if self.size == 8 => "fp".to_string(),
                 idx if self.size == 4 => format!("w{}", idx),
                 idx => format!("x{}", idx),
             },
@@ -93,21 +93,148 @@ impl Varnode {
 }
 
 /// Core subset of Ghidra P-Code opcodes (`OpCode`), augmented with `CallObjC` for Hopper parity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BitfieldKind {
+    Unsigned,
+    Signed,
+    Insert,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PcodeOp {
-    Copy { dst: Varnode, src: Varnode },
-    IntAdd { dst: Varnode, lhs: Varnode, rhs: Varnode },
-    IntSub { dst: Varnode, lhs: Varnode, rhs: Varnode },
-    IntAnd { dst: Varnode, lhs: Varnode, rhs: Varnode },
-    IntEqual { dst: Varnode, lhs: Varnode, rhs: Varnode },
-    Load { dst: Varnode, addr: Varnode },
-    Store { addr: Varnode, src: Varnode },
-    Branch { target: u64 },
-    CBranch { cond: Varnode, target: u64 },
-    BranchInd { target_reg: Varnode, switch_targets: Vec<u64> },
-    Call { target: u64, symbol: Option<String> },
-    CallObjC { stub_addr: u64, selector: String },
-    Return { retval: Varnode },
+    /// Bounded unsigned-halfword relative table, with the original index mapping.
+    TableBranch {
+        target_reg: Varnode,
+        index: Varnode,
+        table_address: u64,
+        offset_base: u64,
+        targets: Vec<u64>,
+    },
+    ShiftedAdd {
+        dst: Option<Varnode>,
+        lhs: Varnode,
+        rhs: Varnode,
+        shift: crate::arm64_flags::Shift,
+        amount: u8,
+    },
+    RegisterOffset {
+        dst: Varnode,
+        base: Varnode,
+        index: Varnode,
+        extend: crate::arm64_indexed::IndexExtend,
+        shift: u8,
+    },
+    TestBitBranch {
+        value: Varnode,
+        bit: u8,
+        nonzero: bool,
+        target: u64,
+    },
+    IntOr {
+        dst: Varnode,
+        lhs: Varnode,
+        rhs: Varnode,
+        shift: crate::arm64_logical::LogicalShift,
+        amount: u8,
+    },
+    FlagArithmetic {
+        dst: Option<Varnode>,
+        lhs: Varnode,
+        rhs: Varnode,
+        shift: crate::arm64_flags::Shift,
+        amount: u8,
+        subtract: bool,
+    },
+    FlagBranch {
+        condition: crate::arm64_flags::Condition,
+        target: u64,
+    },
+    ClobberNzcv,
+    Bitfield {
+        dst: Varnode,
+        src: Varnode,
+        old_dst: Varnode,
+        kind: BitfieldKind,
+        immr: u8,
+        imms: u8,
+    },
+    ExternalTailCall {
+        symbol: String,
+        got_address: u64,
+    },
+    MachOImportTailCall {
+        symbol: String,
+        library: String,
+        pointer_address: u64,
+    },
+    Bti {
+        kind: u8,
+    },
+    ZeroExtend {
+        dst: Varnode,
+        src: Varnode,
+    },
+    CallInd {
+        target: Varnode,
+    },
+    Unsupported {
+        word: u32,
+    },
+    Copy {
+        dst: Varnode,
+        src: Varnode,
+    },
+    IntAdd {
+        dst: Varnode,
+        lhs: Varnode,
+        rhs: Varnode,
+    },
+    IntSub {
+        dst: Varnode,
+        lhs: Varnode,
+        rhs: Varnode,
+    },
+    IntAnd {
+        dst: Varnode,
+        lhs: Varnode,
+        rhs: Varnode,
+    },
+    IntEqual {
+        dst: Varnode,
+        lhs: Varnode,
+        rhs: Varnode,
+    },
+    Load {
+        dst: Varnode,
+        addr: Varnode,
+    },
+    Store {
+        addr: Varnode,
+        src: Varnode,
+    },
+    Branch {
+        target: u64,
+    },
+    CBranch {
+        cond: Varnode,
+        target: u64,
+        branch_on_zero: bool,
+    },
+    BranchInd {
+        target_reg: Varnode,
+        switch_targets: Vec<u64>,
+    },
+    Call {
+        target: u64,
+        symbol: Option<String>,
+    },
+    CallObjC {
+        stub_addr: u64,
+        selector: String,
+    },
+    Return {
+        retval: Varnode,
+    },
     Nop,
 }
 
@@ -142,6 +269,41 @@ pub fn decode_and_lift_arm64(
     objc_stubs: &BTreeMap<u64, String>,
     switch_hints: &SwitchHintTable,
 ) -> DecodedInstruction {
+    let mut insn = decode_arm64_inner(addr, word, seg, objc_stubs, switch_hints);
+    if insn.is_call {
+        insn.pcode.push(PcodeOp::ClobberNzcv);
+    }
+    insn
+}
+
+fn decode_arm64_inner(
+    addr: u64,
+    word: u32,
+    seg: &Segment,
+    objc_stubs: &BTreeMap<u64, String>,
+    switch_hints: &SwitchHintTable,
+) -> DecodedInstruction {
+    if let Some(insn) = crate::arm64_address::decode(addr, word, seg) {
+        return insn;
+    }
+    if let Some(insn) = crate::arm64_flags::decode(addr, word) {
+        return insn;
+    }
+    if let Some(insn) = crate::arm64_test_branch::decode(addr, word) {
+        return insn;
+    }
+    if let Some(insn) = crate::arm64_bitfield::decode(addr, word) {
+        return insn;
+    }
+    if let Some(insn) = crate::arm64_memory::decode(addr, word) {
+        return insn;
+    }
+    if let Some(insn) = crate::arm64_indexed::decode(addr, word) {
+        return insn;
+    }
+    if let Some(insn) = crate::arm64_logical::decode(addr, word) {
+        return insn;
+    }
     let bytes = word.to_le_bytes();
     let fmt_arg = |op_idx: usize, val: u64| -> String {
         seg.operand_formats
@@ -221,7 +383,9 @@ pub fn decode_and_lift_arm64(
             };
         }
 
-        let sym = seg.get_demangled_name_at_address(target).map(str::to_string);
+        let sym = seg
+            .get_demangled_name_at_address(target)
+            .map(str::to_string);
         let formatted = sym.clone().unwrap_or_else(|| fmt_arg(0, target));
         return DecodedInstruction {
             address: addr,
@@ -276,7 +440,11 @@ pub fn decode_and_lift_arm64(
         let imm19 = ((word >> 5) & 0x7ffff) as i32;
         let signed_imm = ((imm19 << 13) >> 13) as i64 * 4;
         let target = (addr as i64).wrapping_add(signed_imm) as u64;
-        let reg_vn = Varnode::reg(rt, if is_64 { 8 } else { 4 });
+        let reg_vn = if rt == 31 {
+            Varnode::imm(0, if is_64 { 8 } else { 4 })
+        } else {
+            Varnode::reg(rt, if is_64 { 8 } else { 4 })
+        };
         let mnem = if is_nz { "cbnz" } else { "cbz" };
         return DecodedInstruction {
             address: addr,
@@ -293,44 +461,7 @@ pub fn decode_and_lift_arm64(
             pcode: vec![PcodeOp::CBranch {
                 cond: reg_vn,
                 target,
-            }],
-        };
-    }
-
-    // 6. B.<cond> <imm19> (0x54000000)
-    if (word & 0xff000010) == 0x54000000 {
-        let cond_code = word & 0xf;
-        let cond_name = match cond_code {
-            0 => "eq",
-            1 => "ne",
-            2 => "cs",
-            3 => "cc",
-            8 => "hi",
-            9 => "ls",
-            10 => "ge",
-            11 => "lt",
-            12 => "gt",
-            13 => "le",
-            _ => "al",
-        };
-        let imm19 = ((word >> 5) & 0x7ffff) as i32;
-        let signed_imm = ((imm19 << 13) >> 13) as i64 * 4;
-        let target = (addr as i64).wrapping_add(signed_imm) as u64;
-        return DecodedInstruction {
-            address: addr,
-            bytes,
-            mnemonic: format!("b.{}", cond_name),
-            raw_args: vec![format!("0x{:x}", target)],
-            formatted_args: vec![fmt_arg(0, target)],
-            is_conditional_jump: true,
-            is_unconditional_jump: false,
-            is_call: false,
-            is_ret: false,
-            branch_target: Some(target),
-            call_ref: None,
-            pcode: vec![PcodeOp::CBranch {
-                cond: Varnode::reg(100 + cond_code as u64, 1),
-                target,
+                branch_on_zero: !is_nz,
             }],
         };
     }
@@ -360,7 +491,10 @@ pub fn decode_and_lift_arm64(
     }
 
     // 8. MOVZ Xd/Wd, #<imm16>, LSL #<shift>
-    if (word & 0x7f800000) == 0x52800000 {
+    if (word & 0x7f800000) == 0x52800000
+        && ((word >> 31) != 0 || ((word >> 21) & 3) < 2)
+        && word & 31 != 31
+    {
         let is_64 = (word >> 31) != 0;
         let rd = (word & 0x1f) as u64;
         let imm16 = ((word >> 5) & 0xffff) as u64;
@@ -387,7 +521,7 @@ pub fn decode_and_lift_arm64(
     }
 
     // 9. ADD / SUB (immediate) Xd, Xn, #<imm12>
-    if (word & 0x1f000000) == 0x11000000 {
+    if (word & 0x1f000000) == 0x11000000 && word & (1 << 29) == 0 {
         let is_64 = (word >> 31) != 0;
         let is_sub = ((word >> 30) & 1) != 0;
         let rd = (word & 0x1f) as u64;
@@ -425,34 +559,6 @@ pub fn decode_and_lift_arm64(
         };
     }
 
-    // 10. ADRP Xd, <page>
-    if (word & 0x9f000000) == 0x90000000 {
-        let rd = (word & 0x1f) as u64;
-        let immlo = ((word >> 29) & 0x3) as i64;
-        let immhi = ((word >> 5) & 0x7ffff) as i64;
-        let raw_pages = (immhi << 2) | immlo;
-        let signed_pages = (raw_pages << 43) >> 43;
-        let page_base = ((addr & !0xfff) as i64).wrapping_add(signed_pages << 12) as u64;
-        let dst = Varnode::reg(rd, 8);
-        return DecodedInstruction {
-            address: addr,
-            bytes,
-            mnemonic: "adrp".into(),
-            raw_args: vec![dst.display_arm64(), format!("0x{:x}", page_base)],
-            formatted_args: vec![dst.display_arm64(), fmt_arg(1, page_base)],
-            is_conditional_jump: false,
-            is_unconditional_jump: false,
-            is_call: false,
-            is_ret: false,
-            branch_target: None,
-            call_ref: None,
-            pcode: vec![PcodeOp::Copy {
-                dst,
-                src: Varnode::imm(page_base, 8),
-            }],
-        };
-    }
-
     // Fallback generic instruction representation
     DecodedInstruction {
         address: addr,
@@ -466,7 +572,7 @@ pub fn decode_and_lift_arm64(
         is_ret: false,
         branch_target: None,
         call_ref: None,
-        pcode: vec![PcodeOp::Nop],
+        pcode: vec![PcodeOp::Unsupported { word }],
     }
 }
 
@@ -503,16 +609,105 @@ pub fn decompile_instructions_to_pseudocode_with_aliases(
         ""
     };
     out.push_str(&format!(
-        "// Ghidra-Hopper Hybrid Decompiler (P-Code SSA + ObjC Metadata + Hopper Register Aliases)\nint64_t {}({}) {{ // @ 0x{:x}\n",
+        "// Experimental partial ARM64 pseudocode; no SSA or type recovery\nint64_t {}({}) {{ // @ 0x{:x}\n",
         proc_name, sig_params, entry_addr
     ));
 
     let mut reg_consts: BTreeMap<u64, u64> = BTreeMap::new();
+    out.push_str("    nzcv = unknown_nzcv_at_entry(); // incoming flags are not assumed\n");
+    let targets: std::collections::BTreeSet<_> = insns
+        .iter()
+        .filter(|insn| !insn.is_call)
+        .filter_map(|insn| insn.branch_target)
+        .collect();
 
     for insn in insns {
+        if let Some(PcodeOp::Unsupported { word }) = insn.pcode.first() {
+            out.push_str(&format!("    /* INCOMPLETE: unsupported instruction 0x{word:08x} at 0x{:x}; analysis stopped */\n", insn.address));
+            break;
+        }
+        // Sorted instructions are not a dataflow merge. Clear at control-flow joins.
+        if targets.contains(&insn.address) {
+            reg_consts.clear();
+        }
+        out.push_str(&format!("loc_{:x}:\n", insn.address));
         for op in &insn.pcode {
             match op {
+                PcodeOp::ShiftedAdd{dst,lhs,rhs,shift,amount}=>{
+                    if let Some(dst)=dst {reg_consts.remove(&dst.offset);}
+                    let result=dst.map(|dst|dst.display_arm64_with_aliases(reg_aliases)).unwrap_or_else(||"discard".into());
+                    out.push_str(&format!("    {result} = arm64_add_u{}({}, arm64_shift_{:?}_u{}({}, {})); // NZCV preserved\n",lhs.size*8,lhs.display_arm64_with_aliases(reg_aliases),shift,rhs.size*8,rhs.display_arm64_with_aliases(reg_aliases),amount));
+                }
+                PcodeOp::RegisterOffset{dst,base,index,extend,shift}=>{
+                    out.push_str(&format!("    {} = arm64_reg_offset_{:?}({}, {}, {});\n",dst.display_arm64_with_aliases(reg_aliases),extend,base.display_arm64_with_aliases(reg_aliases),index.display_arm64_with_aliases(reg_aliases),shift));
+                }
+                PcodeOp::TestBitBranch{value,bit,nonzero,target}=>{
+                    reg_consts.clear();
+                    out.push_str(&format!("    if ((({} >> {}) & 1) {} 0) goto loc_{target:x}; // NZCV preserved\n",value.display_arm64_with_aliases(reg_aliases),bit,if *nonzero {"!="}else{"=="}));
+                }
+                PcodeOp::IntOr{dst,lhs,rhs,shift,amount}=>{
+                    if dst.space==SpaceKind::Register {reg_consts.remove(&dst.offset);}
+                    out.push_str(&format!("    {} = {} | arm64_shift_{:?}_u{}({}, {}); // NZCV preserved\n",dst.display_arm64_with_aliases(reg_aliases),lhs.display_arm64_with_aliases(reg_aliases),shift,rhs.size*8,rhs.display_arm64_with_aliases(reg_aliases),amount));
+                }
+                PcodeOp::FlagArithmetic{dst,lhs,rhs,shift,amount,subtract} => {
+                    if let Some(dst)=dst {reg_consts.remove(&dst.offset);}
+                    let result=dst.map(|dst|dst.display_arm64_with_aliases(reg_aliases)).unwrap_or_else(||"discard".into());
+                    out.push_str(&format!("    ({result}, nzcv) = arm64_{}s_u{}({}, arm64_shift_{:?}_u{}({}, {}));\n",if *subtract {"sub"}else{"add"},lhs.size*8,lhs.display_arm64_with_aliases(reg_aliases),shift,rhs.size*8,rhs.display_arm64_with_aliases(reg_aliases),amount));
+                }
+                PcodeOp::FlagBranch{condition,target}=>{
+                    reg_consts.clear();
+                    out.push_str(&format!("    if ({}) goto loc_{target:x};\n",condition.expression()));
+                }
+                PcodeOp::ClobberNzcv=>out.push_str("    nzcv = unknown_nzcv_after_call();\n"),
+                PcodeOp::Bitfield{dst,src,old_dst,kind,immr,imms} => {
+                    if dst.space==SpaceKind::Register {reg_consts.remove(&dst.offset);}
+                    out.push_str(&format!("    {} = arm64_{:?}_bitfield_u{}({}, {}, {}, {});\n",dst.display_arm64_with_aliases(reg_aliases),kind,dst.size*8,src.display_arm64_with_aliases(reg_aliases),old_dst.display_arm64_with_aliases(reg_aliases),immr,imms));
+                }
+                PcodeOp::ExternalTailCall{symbol,got_address} => out.push_str(&format!("    tailcall_external({symbol:?}, got=0x{got_address:x}); // JUMP_SLOT symbol resolved; runtime address and signature unknown\n")),
+                PcodeOp::MachOImportTailCall{symbol,library,pointer_address} => out.push_str(&format!("    tailcall_import({symbol:?}, dylib={library:?}, slot=0x{pointer_address:x}); // Mach-O indirect symbol binding; runtime address and signature unknown\n")),
+                PcodeOp::Bti { kind } => out.push_str(&format!(
+                    "    bti_guard({}); // runtime branch-target protection\n",
+                    kind
+                )),
+                PcodeOp::Load { dst, addr } => {
+                    if dst.space == SpaceKind::Register {
+                        reg_consts.remove(&dst.offset);
+                    }
+                    out.push_str(&format!(
+                        "    {} = load_u{}({});\n",
+                        dst.display_arm64_with_aliases(reg_aliases),
+                        dst.size as u16 * 8,
+                        addr.display_arm64_with_aliases(reg_aliases)
+                    ));
+                }
+                PcodeOp::Store { addr, src } => out.push_str(&format!(
+                    "    store_u{}({}, {});\n",
+                    src.size as u16 * 8,
+                    addr.display_arm64_with_aliases(reg_aliases),
+                    src.display_arm64_with_aliases(reg_aliases)
+                )),
+                PcodeOp::ZeroExtend { dst, src } => {
+                    if dst.space == SpaceKind::Register {
+                        reg_consts.remove(&dst.offset);
+                    }
+                    out.push_str(&format!(
+                        "    {} = zero_extend_u{}({});\n",
+                        dst.display_arm64_with_aliases(reg_aliases),
+                        src.size as u16 * 8,
+                        src.display_arm64_with_aliases(reg_aliases)
+                    ));
+                }
+                PcodeOp::CallInd { target } => {
+                    reg_consts.retain(|reg, _| *reg > 18);
+                    out.push_str(&format!(
+                        "    call_indirect({}); // signature unknown\n",
+                        target.display_arm64_with_aliases(reg_aliases)
+                    ));
+                }
                 PcodeOp::Copy { dst, src } => {
+                    if dst.space == SpaceKind::Register {
+                        reg_consts.remove(&dst.offset);
+                    }
                     if dst.space == SpaceKind::Register && src.space == SpaceKind::Constant {
                         reg_consts.insert(dst.offset, src.offset);
                     }
@@ -523,12 +718,21 @@ pub fn decompile_instructions_to_pseudocode_with_aliases(
                     ));
                 }
                 PcodeOp::IntAdd { dst, lhs, rhs } => {
+                    let previous = reg_consts.get(&lhs.offset).copied();
+                    if dst.space == SpaceKind::Register {
+                        reg_consts.remove(&dst.offset);
+                    }
                     if dst.space == SpaceKind::Register
                         && lhs.space == SpaceKind::Register
                         && rhs.space == SpaceKind::Constant
                     {
-                        if let Some(&base) = reg_consts.get(&lhs.offset) {
-                            let resolved = base.wrapping_add(rhs.offset);
+                        if let Some(base) = previous {
+                            let resolved = base.wrapping_add(rhs.offset)
+                                & if dst.size == 4 {
+                                    u32::MAX as u64
+                                } else {
+                                    u64::MAX
+                                };
                             reg_consts.insert(dst.offset, resolved);
                             if let Some(s) = read_ascii_at(seg, resolved) {
                                 out.push_str(&format!(
@@ -549,6 +753,7 @@ pub fn decompile_instructions_to_pseudocode_with_aliases(
                     ));
                 }
                 PcodeOp::IntSub { dst, lhs, rhs } => {
+                    reg_consts.remove(&dst.offset);
                     out.push_str(&format!(
                         "    {} = {} - {};\n",
                         dst.display_arm64_with_aliases(reg_aliases),
@@ -556,15 +761,30 @@ pub fn decompile_instructions_to_pseudocode_with_aliases(
                         rhs.display_arm64_with_aliases(reg_aliases)
                     ));
                 }
-                PcodeOp::CBranch { cond, target } => {
+                PcodeOp::CBranch {
+                    cond,
+                    target,
+                    branch_on_zero,
+                } => {
+                    reg_consts.clear();
                     out.push_str(&format!(
-                        "    if ({}) goto loc_{:x};\n",
+                        "    if ({}{}) goto loc_{:x};\n",
                         cond.display_arm64_with_aliases(reg_aliases),
+                        if *branch_on_zero { " == 0" } else { "" },
                         target
                     ));
                 }
                 PcodeOp::Branch { target } => {
+                    reg_consts.clear();
                     out.push_str(&format!("    goto loc_{:x};\n", target));
+                }
+                PcodeOp::TableBranch { index, table_address, offset_base, targets, .. } => {
+                    reg_consts.clear();
+                    out.push_str(&format!("    switch ({}) {{ // verified u16 table 0x{table_address:x}, base 0x{offset_base:x}, scale 4; {} entries\n", index.display_arm64_with_aliases(reg_aliases), targets.len()));
+                    for (idx, target) in targets.iter().enumerate() {
+                        out.push_str(&format!("        case {idx}: goto loc_{target:x};\n"));
+                    }
+                    out.push_str("    }\n");
                 }
                 PcodeOp::BranchInd {
                     target_reg,
@@ -589,27 +809,39 @@ pub fn decompile_instructions_to_pseudocode_with_aliases(
                 }
                 PcodeOp::CallObjC { selector, .. } => {
                     // Hopper's signature strength: readable Objective-C message syntax!
-                    let recv_name = reg_aliases
-                        .get(&0)
-                        .map(String::as_str)
-                        .unwrap_or("x0");
+                    let recv_name = reg_aliases.get(&0).map(String::as_str).unwrap_or("x0");
                     let arg_preview = reg_consts
                         .get(&2)
                         .and_then(|&a| read_ascii_at(seg, a))
-                        .map(|s| format!("@\"{}\"", s))
+                        .map(|s| format!("{s:?}"))
                         .unwrap_or_else(|| {
-                            reg_aliases.get(&2).cloned().unwrap_or_else(|| "x2".to_string())
+                            reg_aliases
+                                .get(&2)
+                                .cloned()
+                                .unwrap_or_else(|| "x2".to_string())
                         });
-                    if selector.contains(':') {
-                        out.push_str(&format!(
-                            "    {} = [{} {}{}];\n",
-                            recv_name, recv_name, selector, arg_preview
-                        ));
-                    } else {
-                        out.push_str(&format!("    {} = [{} {}];\n", recv_name, recv_name, selector));
-                    }
+                    let args: Vec<String> = (0..selector.matches(':').count())
+                        .map(|i| {
+                            if i == 0 {
+                                arg_preview.clone()
+                            } else if i < 6 {
+                                reg_aliases
+                                    .get(&(i as u64 + 2))
+                                    .cloned()
+                                    .unwrap_or_else(|| format!("x{}", i + 2))
+                            } else {
+                                format!("unknown_stack_arg_{i}")
+                            }
+                        })
+                        .collect();
+                    out.push_str(&format!(
+                        "    {recv_name} = {};\n",
+                        format_objc_message(recv_name, selector, &args)
+                    ));
+                    reg_consts.retain(|reg, _| *reg > 18);
                 }
                 PcodeOp::Call { target, symbol } => {
+                    reg_consts.retain(|reg, _| *reg > 18);
                     let name = symbol
                         .clone()
                         .unwrap_or_else(|| format!("sub_{:x}", target));
@@ -630,11 +862,33 @@ pub fn decompile_instructions_to_pseudocode_with_aliases(
     out
 }
 
-fn read_ascii_at(seg: &Segment, addr: u64) -> Option<String> {
-    let bytes = seg.read_bytes(addr, 64)?;
+pub fn read_ascii_at(seg: &Segment, addr: u64) -> Option<String> {
+    let available = seg
+        .length()
+        .checked_sub(addr.checked_sub(seg.start_address)?)?;
+    let bytes = seg.read_bytes(addr, available.min(4096) as usize)?;
     let end = bytes.iter().position(|&b| b == 0)?;
     if end == 0 || !bytes[..end].iter().all(|&b| (0x20..=0x7e).contains(&b)) {
         return None;
     }
     Some(String::from_utf8_lossy(&bytes[..end]).to_string())
+}
+
+pub fn format_objc_message(receiver: &str, selector: &str, args: &[String]) -> String {
+    if !selector.contains(':') {
+        return format!("[{receiver} {selector}]");
+    }
+    let parts: Vec<_> = selector.split(':').collect();
+    let pairs: Vec<_> = parts[..parts.len() - 1]
+        .iter()
+        .enumerate()
+        .map(|(i, part)| {
+            format!(
+                "{}:{}",
+                part,
+                args.get(i).map(String::as_str).unwrap_or("unknown_arg")
+            )
+        })
+        .collect();
+    format!("[{receiver} {}]", pairs.join(" "))
 }
