@@ -178,7 +178,7 @@ fn acquire_and_thread_reads_are_explicit_and_never_constant_or_plain_loads() {
         assert_eq!(i.pcode.len(), 1);
     }
     assert!(matches!(decode(0xc8dfffe0).pcode[0],PcodeOp::LoadAcquire{addr,..} if addr.offset==31));
-    for w in [0x885ffc00, 0xb8e00020, 0x88dffc1f, 0xd53bd060] {
+    for w in [0x885f7c00, 0xb8e01020, 0x88dffc1f, 0xd53bd060] {
         assert!(matches!(decode(w).pcode[0], PcodeOp::Unsupported { .. }));
     }
     assert!(

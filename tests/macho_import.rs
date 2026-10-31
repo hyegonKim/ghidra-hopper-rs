@@ -121,7 +121,7 @@ fn links_stub_slot_symbol_and_dependency_without_inventing_runtime_address() {
     let (program, proc) = analyze(&b, 0x1200, 3);
     assert!(!proc.is_incomplete());
     assert!(
-        matches!(&proc.basic_blocks[0].instructions[2].pcode[0], PcodeOp::MachOImportTailCall { symbol, library, pointer_address: 0x2000 } if symbol == "_foo" && library.ends_with("libFixture.dylib"))
+        matches!(&proc.basic_blocks[0].instructions[2].pcode[0], PcodeOp::MachOImportTailCall { symbol, library, pointer_address: 0x2000, .. } if symbol == "_foo" && library.ends_with("libFixture.dylib"))
     );
     assert!(proc.basic_blocks[0].successors.is_empty());
     assert!(program.references.iter().any(|r| r.from_addr == 0x1208
@@ -307,10 +307,14 @@ fn fat_slice_offsets_and_explicit_switch_overrides_remain_correct() {
 }
 
 #[test]
-fn only_platform_stack_failure_import_is_nonreturning() {
-    for platform in [false, true] {
+fn platform_stack_failure_and_exit_imports_are_nonreturning() {
+    for (symbol, platform) in [
+        (&b"\0___stack_chk_fail\0"[..], false),
+        (&b"\0___stack_chk_fail\0"[..], true),
+        (&b"\0_exit\0"[..], false),
+        (&b"\0_exit\0"[..], true),
+    ] {
         let mut b = fixture();
-        let symbol = b"\0___stack_chk_fail\0";
         b[0x540..0x560].fill(0);
         b[0x540..0x540 + symbol.len()].copy_from_slice(symbol);
         if platform {

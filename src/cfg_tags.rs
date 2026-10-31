@@ -20,6 +20,9 @@ pub struct BasicBlock {
 
 #[derive(Debug, Clone)]
 pub struct Procedure {
+    /// Lifted instructions, including discarded paths and bounded callee proofs.
+    pub analysis_work: usize,
+    pub nonreturning_proofs: BTreeMap<u64, (usize, bool)>,
     pub name: String,
     pub entry_address: u64,
     pub basic_blocks: Vec<BasicBlock>,
@@ -147,6 +150,7 @@ impl Procedure {
                 break;
             }
         }
+        let analysis_work = decoded.len();
         crate::arm64_jump_table::validate(&mut decoded, entry_address, seg);
         // Publish code states, references, and leaders only after late-edge
         // validation. Duplicate table entries remain cases, but edges are unique.
@@ -243,6 +247,8 @@ impl Procedure {
         }
 
         let mut proc = Self {
+            analysis_work,
+            nonreturning_proofs: BTreeMap::new(),
             name: proc_name,
             entry_address,
             basic_blocks,
@@ -301,10 +307,85 @@ impl Procedure {
             })
     }
 
+    /// A complete overapproximation with no normal return and only trusted
+    /// nonreturning terminal calls. Unknown boundaries/branches cannot prove it.
+    pub(crate) fn proves_no_normal_return(&self) -> bool {
+        !self.is_incomplete()
+            && !self
+                .basic_blocks
+                .iter()
+                .flat_map(|b| &b.instructions)
+                .any(|i| i.is_ret)
+            && self.basic_blocks.iter().any(|b| b.successors.is_empty())
+            && self
+                .basic_blocks
+                .iter()
+                .filter(|b| b.successors.is_empty())
+                .all(|b| {
+                    b.instructions.last().is_some_and(|i| {
+                        matches!(
+                            i.pcode.first(),
+                            Some(crate::pcode_sleigh::PcodeOp::NoReturnCall { .. })
+                        )
+                    })
+                })
+    }
+
+    /// Reuse lifted caller nodes after proving a callee. No extra instruction
+    /// budget is hidden by re-decoding the caller, and unreachable nodes vanish.
+    pub(crate) fn apply_nonreturning(&mut self, targets: &BTreeSet<u64>) {
+        for bb in &mut self.basic_blocks {
+            if let Some(n) = bb
+                .instructions
+                .iter()
+                .position(|i| i.is_call && i.branch_target.is_some_and(|t| targets.contains(&t)))
+            {
+                let i = &mut bb.instructions[n];
+                let target = i.branch_target.unwrap();
+                i.pcode = vec![crate::pcode_sleigh::PcodeOp::NoReturnCall {
+                    target,
+                    symbol: format!("proven_nonreturning_0x{target:x}"),
+                }];
+                i.is_unconditional_jump = true;
+                bb.end_address = i.address + 4;
+                bb.successors.clear();
+                bb.instructions.truncate(n + 1);
+            }
+        }
+        let blocks: BTreeMap<_, _> = self
+            .basic_blocks
+            .iter()
+            .map(|b| (b.start_address, b.successors.clone()))
+            .collect();
+        let mut reached = BTreeSet::new();
+        let mut pending = BTreeSet::from([self.entry_address]);
+        while let Some(pc) = pending.pop_first() {
+            if reached.insert(pc) {
+                if let Some(next) = blocks.get(&pc) {
+                    pending.extend(next);
+                }
+            }
+        }
+        self.basic_blocks
+            .retain(|b| reached.contains(&b.start_address));
+        for (n, b) in self.basic_blocks.iter_mut().enumerate() {
+            b.index = n;
+        }
+    }
+
     /// Renders the partial analysis, with explicit completeness status.
     pub fn render_four_modes(&self, seg: &Segment) -> String {
         let mut out = String::new();
         out.push_str(if self.is_incomplete() {"Analysis status: INCOMPLETE (unsupported instruction, unresolved edge, or instruction budget)\n"} else {"Analysis status: supported subset only; full semantic equivalence is unverified\n"});
+        out.push_str(&format!(
+            "Instruction work: {} (caller plus bounded callee proofs)\n",
+            self.analysis_work
+        ));
+        for (&target, &(work, proven)) in &self.nonreturning_proofs {
+            out.push_str(&format!(
+                "Nonreturn proof: 0x{target:x}, {work} instructions, proven={proven}\n"
+            ));
+        }
 
         // MODE 1: Assembly View (with ByteType, XREFs, ObjC selectors, and inline comments)
         out.push_str("=== [Mode 1: Hopper Assembly + Byte-State View] ===\n");

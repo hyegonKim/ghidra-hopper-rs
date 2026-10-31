@@ -291,7 +291,8 @@ impl HopperHybridObjcAnalyzerRs {
             }
         }
         for binding in prog.macho_imports.values().filter(|b| {
-            b.symbol == "___stack_chk_fail" && b.library == "/usr/lib/libSystem.B.dylib"
+            matches!(b.symbol.as_str(), "___stack_chk_fail" | "_exit")
+                && b.library == "/usr/lib/libSystem.B.dylib"
         }) {
             if binding.instructions.iter().enumerate().all(|(n, word)| {
                 prog.segment_at(binding.stub_address)
@@ -301,6 +302,7 @@ impl HopperHybridObjcAnalyzerRs {
                 nonreturning.insert(binding.stub_address, binding.symbol.clone());
             }
         }
+        let original_segment = prog.segment_at(entry_addr).unwrap().clone();
         let mut proc = {
             let seg = prog
                 .segment_at_mut(entry_addr)
@@ -315,6 +317,98 @@ impl HopperHybridObjcAnalyzerRs {
                 &nonreturning,
             )
         };
+        // Only inspect declared direct callees at unverified boundaries, once,
+        // with the unused caller budget. This is a one-level proof, not a guess
+        // from the callee name or from its last instruction alone.
+        let targets: std::collections::BTreeSet<_> = proc
+            .basic_blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .filter(|i| {
+                i.is_call
+                    && matches!(
+                        i.pcode.first(),
+                        Some(crate::pcode_sleigh::PcodeOp::Call { .. })
+                    )
+                    && i.pcode.iter().any(|op| {
+                        matches!(
+                            op,
+                            crate::pcode_sleigh::PcodeOp::UnverifiedContinuation { .. }
+                        )
+                    })
+            })
+            .filter_map(|i| i.branch_target)
+            .filter(|&target| {
+                target != entry_addr
+                    && prog
+                        .segment_at(target)
+                        .is_some_and(|s| s.function_starts.contains(&target))
+            })
+            .collect();
+        let initial_addresses: std::collections::BTreeSet<_> = proc
+            .basic_blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .map(|i| i.address)
+            .collect();
+        let mut proven = std::collections::BTreeSet::new();
+        for target in targets {
+            let remaining = max_insns.saturating_sub(proc.analysis_work);
+            if remaining == 0 {
+                break;
+            }
+            let mut snapshot = prog.segment_at(target).unwrap().clone();
+            let proof = Procedure::analyze_arm64_with_imports(
+                "bounded nonreturn proof",
+                target,
+                remaining,
+                &mut snapshot,
+                &stubs,
+                &hints,
+                &nonreturning,
+            );
+            let success = proof.proves_no_normal_return();
+            proc.analysis_work += proof.analysis_work;
+            proc.nonreturning_proofs
+                .insert(target, (proof.analysis_work, success));
+            if success {
+                proven.insert(target);
+            }
+        }
+        if !proven.is_empty() {
+            proc.apply_nonreturning(&proven);
+            let kept: std::collections::BTreeSet<_> = proc
+                .basic_blocks
+                .iter()
+                .flat_map(|b| &b.instructions)
+                .map(|i| i.address)
+                .collect();
+            let seg = prog.segment_at_mut(entry_addr).unwrap();
+            for &address in initial_addresses.difference(&kept) {
+                let offset = (address - seg.start_address) as usize;
+                seg.byte_types[offset..offset + 4]
+                    .copy_from_slice(&original_segment.byte_types[offset..offset + 4]);
+            }
+            seg.refs_from = original_segment.refs_from.clone();
+            seg.refs_to = original_segment.refs_to.clone();
+            for i in proc.basic_blocks.iter().flat_map(|b| &b.instructions) {
+                if let Some(target) = i.branch_target {
+                    seg.add_reference(i.address, target);
+                }
+                match i.pcode.first() {
+                    Some(crate::pcode_sleigh::PcodeOp::TableBranch { targets, .. })
+                    | Some(crate::pcode_sleigh::PcodeOp::BranchInd {
+                        switch_targets: targets,
+                        ..
+                    }) => {
+                        for &t in targets {
+                            seg.add_reference(i.address, t);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
         for bb in &mut proc.basic_blocks {
             let decoded_words: BTreeMap<_, _> = bb
                 .instructions
@@ -335,6 +429,7 @@ impl HopperHybridObjcAnalyzerRs {
                             symbol: binding.symbol.clone(),
                             library: binding.library.clone(),
                             pointer_address: binding.pointer_address,
+                            selector_address: binding.selector_address,
                         }];
                         prog.add_memory_reference(
                             insn.address,

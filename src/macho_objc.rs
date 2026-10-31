@@ -55,7 +55,8 @@ pub struct MachOImportBinding {
     pub pointer_address: u64,
     pub symbol: String,
     pub library: String,
-    pub instructions: [u32; 3],
+    pub instructions: Vec<u32>,
+    pub selector_address: Option<u64>,
 }
 
 #[derive(Debug, Clone)]

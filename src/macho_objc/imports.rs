@@ -1,12 +1,14 @@
 //! Canonical ARM64 Mach-O import stubs. File pointer values are deliberately
 //! ignored: dyld rebasing, binding, and chained fixups determine runtime values.
 use super::{
-    checked_range, read_u16_le, read_u32_le, read_u64_le, validate_table, MachOImportBinding,
+    checked_range, clean_fixed_str, read_u16_le, read_u32_le, read_u64_le, validate_table,
+    MachOImportBinding,
 };
 use crate::segment::Segment;
 use std::collections::BTreeMap;
 
 struct IndirectSection {
+    name: String,
     address: u64,
     offset: usize,
     size: usize,
@@ -99,7 +101,10 @@ pub(super) fn resolve(
                 for n in 0..count {
                     let at = command + 72 + n * 80;
                     let kind = read_u32_le(slice, at + 64).unwrap() & 0xff;
-                    if !matches!(kind, 6..=8) {
+                    let name = clean_fixed_str(&slice[at..at + 16]);
+                    if !matches!(kind, 6..=8)
+                        && !matches!(name.as_str(), "__objc_stubs" | "__objc_selrefs")
+                    {
                         continue;
                     }
                     let address = read_u64_le(slice, at + 32).unwrap();
@@ -111,16 +116,19 @@ pub(super) fn resolve(
                         .checked_add(length as u64)
                         .ok_or("Import section address overflow")?;
                     sections.push(IndirectSection {
+                        stride: if name == "__objc_stubs" {
+                            32
+                        } else if kind == 8 {
+                            read_u32_le(slice, at + 72).unwrap() as usize
+                        } else {
+                            8
+                        },
+                        name,
                         address,
                         offset,
                         size: length,
                         kind,
                         first: read_u32_le(slice, at + 68).unwrap() as usize,
-                        stride: if kind == 8 {
-                            read_u32_le(slice, at + 72).unwrap() as usize
-                        } else {
-                            8
-                        },
                     });
                 }
             }
@@ -142,35 +150,83 @@ pub(super) fn resolve(
         // INDIRECT_SYMBOL_LOCAL / ABS are not indices into nlist_64.
         (symbol & 0xc0000000 == 0 && (symbol as usize) < symcount).then_some(symbol)
     };
-    for section in sections
-        .iter()
-        .filter(|s| s.kind == 8 && s.stride == 12 && s.size.is_multiple_of(12))
-    {
-        for n in 0..section.size / 12 {
-            let Some(symbol_index) = index(section, n) else {
-                continue;
+    for section in sections.iter().filter(|s| {
+        (s.kind == 8 && s.stride == 12 && s.size.is_multiple_of(12))
+            || (s.name == "__objc_stubs" && s.kind == 0 && s.size.is_multiple_of(32))
+    }) {
+        let objc = section.name == "__objc_stubs";
+        let code_size = if objc { 20 } else { 12 };
+        for n in 0..section.size / section.stride {
+            let stub_symbol = if objc {
+                None
+            } else {
+                let Some(symbol) = index(section, n) else {
+                    continue;
+                };
+                Some(symbol)
             };
-            let pc = section.address + n as u64 * 12;
-            let offset = section.offset + n * 12;
-            let code = &slice[offset..offset + 12];
+            let pc = section.address + (n * section.stride) as u64;
+            let offset = section.offset + n * section.stride;
+            let code = &slice[offset..offset + code_size];
             if !pc.is_multiple_of(4)
                 || !segments.iter().any(|s| {
                     s.permissions == Some(5)
                         && s.file_offset_for_address(pc) == Some(offset as u64)
-                        && s.read_bytes(pc, 12) == Some(code)
+                        && s.read_bytes(pc, code_size) == Some(code)
                 })
             {
                 continue;
             }
-            let a = read_u32_le(code, 0).unwrap();
-            let l = read_u32_le(code, 4).unwrap();
-            let b = read_u32_le(code, 8).unwrap();
+            let selector_address = if objc {
+                let a = read_u32_le(code, 0).unwrap();
+                let l = read_u32_le(code, 4).unwrap();
+                if a & 0x9f00001f != 0x90000001 || l & 0xffc003ff != 0xf9400021 {
+                    continue;
+                }
+                let imm = (((a >> 5) & 0x7ffff) << 2) | ((a >> 29) & 3);
+                let pages = ((imm as i64) << 43) >> 43;
+                let Some(selref) = (pc & !0xfff)
+                    .wrapping_add((pages << 12) as u64)
+                    .checked_add((((l >> 10) & 4095) * 8) as u64)
+                else {
+                    continue;
+                };
+                let selrefs: Vec<_> = sections
+                    .iter()
+                    .filter(|s| {
+                        s.name == "__objc_selrefs"
+                            && selref >= s.address
+                            && selref - s.address < s.size as u64
+                    })
+                    .collect();
+                let [s] = selrefs.as_slice() else {
+                    continue;
+                };
+                let rel = selref - s.address;
+                if !rel.is_multiple_of(8)
+                    || s.size % 8 != 0
+                    || !segments.iter().any(|seg| {
+                        seg.permissions.is_some_and(|p| p & 1 != 0)
+                            && seg.file_offset_for_address(selref) == Some(s.offset as u64 + rel)
+                            && seg.read_bytes(selref, 8).is_some()
+                    })
+                {
+                    continue;
+                }
+                Some(selref)
+            } else {
+                None
+            };
+            let suffix = if objc { 8 } else { 0 };
+            let a = read_u32_le(code, suffix).unwrap();
+            let l = read_u32_le(code, suffix + 4).unwrap();
+            let b = read_u32_le(code, suffix + 8).unwrap();
             if a & 0x9f00001f != 0x90000010 || l & 0xffc003ff != 0xf9400210 || b != 0xd61f0200 {
                 continue;
             }
             let imm = (((a >> 5) & 0x7ffff) << 2) | ((a >> 29) & 3);
             let pages = ((imm as i64) << 43) >> 43;
-            let page = (pc & !0xfff).wrapping_add((pages << 12) as u64);
+            let page = ((pc + suffix as u64) & !0xfff).wrapping_add((pages << 12) as u64);
             let Some(pointer) = page.checked_add((((l >> 10) & 4095) * 8) as u64) else {
                 continue;
             };
@@ -189,9 +245,12 @@ pub(super) fn resolve(
                 continue;
             };
             let relative = pointer - slot.address;
+            let Some(symbol_index) = index(slot, (relative / 8) as usize) else {
+                continue;
+            };
             if !relative.is_multiple_of(8)
                 || slot.size % 8 != 0
-                || index(slot, (relative / 8) as usize) != Some(symbol_index)
+                || stub_symbol.is_some_and(|s| s != symbol_index)
             {
                 continue;
             }
@@ -230,7 +289,10 @@ pub(super) fn resolve(
             let Some(symbol) = cstring(strings, name_offset) else {
                 continue;
             };
-            let Some(branch) = pc.checked_add(8) else {
+            if objc && (symbol != "_objc_msgSend" || library != "/usr/lib/libobjc.A.dylib") {
+                continue;
+            }
+            let Some(branch) = pc.checked_add(code_size as u64 - 4) else {
                 continue;
             };
             // Overlapping stub declarations are ambiguous, even if names agree.
@@ -244,7 +306,11 @@ pub(super) fn resolve(
                     pointer_address: pointer,
                     symbol,
                     library: library.clone(),
-                    instructions: [a, l, b],
+                    instructions: code
+                        .chunks_exact(4)
+                        .map(|w| u32::from_le_bytes(w.try_into().unwrap()))
+                        .collect(),
+                    selector_address,
                 },
             );
         }

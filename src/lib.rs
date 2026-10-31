@@ -1,4 +1,5 @@
 pub mod arm64_address;
+pub mod arm64_atomic;
 pub mod arm64_bitfield;
 pub mod arm64_data;
 pub mod arm64_flags;
@@ -6,6 +7,7 @@ pub mod arm64_indexed;
 mod arm64_jump_table;
 pub mod arm64_logical;
 mod arm64_memory;
+pub mod arm64_simd;
 pub mod arm64_test_branch;
 pub mod cfg_tags;
 pub mod ghidra_port;

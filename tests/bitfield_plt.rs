@@ -282,3 +282,99 @@ fn stack_failure_call_stops_before_adjacent_function_only_with_live_binding() {
         PcodeOp::NoReturnCall { .. }
     ));
 }
+
+fn proof_program(callee: &[u32], multi_call: bool) -> GhidraProgram {
+    let mut b = elf();
+    let names = b"\0__stack_chk_fail\0bar\0";
+    b[0x280..0x280 + names.len()].copy_from_slice(names);
+    p64(&mut b, 128 + 2 * 64 + 32, names.len() as u64);
+    p32(&mut b, 0x330, 18);
+    p32(&mut b, 0x200, 0x94000014); // BL 0x1250
+    if multi_call {
+        p32(&mut b, 0x204, 0xd503201f);
+        p32(&mut b, 0x208, 0x94000012);
+    }
+    for (n, w) in callee.iter().enumerate() {
+        p32(&mut b, 0x250 + n * 4, *w);
+    }
+    let image = MachOImage::parse(&b).unwrap();
+    let mut p = GhidraProgram::from_macho_image("proof", &image);
+    p.segments[0].function_starts.extend([
+        0x1200,
+        if multi_call { 0x120c } else { 0x1204 },
+        0x1250,
+    ]);
+    p
+}
+#[test]
+fn callee_proof_is_complete_nonreturning_and_charged_to_one_budget() {
+    for (budget, proven) in [(1, false), (2, true), (8, true)] {
+        let mut p = proof_program(&[0x9400006c], false);
+        let f = HopperHybridObjcAnalyzerRs::new().analyze_function_zero_ipc(
+            &mut p,
+            "proof",
+            0x1200,
+            budget,
+            &[],
+        );
+        assert_eq!(!f.is_incomplete(), proven);
+        assert!(f.analysis_work <= budget);
+        if proven {
+            assert_eq!(f.analysis_work, 2);
+            assert_eq!(f.nonreturning_proofs[&0x1250], (1, true));
+        }
+    }
+    for (budget, proven) in [(2, false), (3, true)] {
+        let mut p = proof_program(&[0xd503201f, 0x9400006b], false);
+        let f = HopperHybridObjcAnalyzerRs::new().analyze_function_zero_ipc(
+            &mut p,
+            "proof",
+            0x1200,
+            budget,
+            &[],
+        );
+        assert_eq!(!f.is_incomplete(), proven);
+        assert_eq!(f.analysis_work, budget);
+    }
+}
+#[test]
+fn normal_return_unknown_opcode_or_closed_loop_is_not_a_noreturn_proof() {
+    for code in [
+        vec![0xd65f03c0],
+        vec![0xffffffff],
+        vec![0x14000000],
+        vec![0x34000080, 0x9400006b, 0xd503201f, 0xd503201f, 0xd65f03c0],
+    ] {
+        let mut p = proof_program(&code, false);
+        let f = HopperHybridObjcAnalyzerRs::new().analyze_function_zero_ipc(
+            &mut p,
+            "proof",
+            0x1200,
+            16,
+            &[],
+        );
+        assert!(f.is_incomplete());
+        assert!(!f.nonreturning_proofs[&0x1250].1);
+    }
+}
+#[test]
+fn proven_calls_prune_cached_caller_without_hidden_redecode_or_stale_refs() {
+    let mut p = proof_program(&[0x9400006c], true);
+    let f = HopperHybridObjcAnalyzerRs::new().analyze_function_zero_ipc(
+        &mut p,
+        "proof",
+        0x1200,
+        8,
+        &[],
+    );
+    assert!(!f.is_incomplete());
+    assert_eq!(f.analysis_work, 4);
+    assert_eq!(f.basic_blocks[0].instructions.len(), 1);
+    let seg = &p.segments[0];
+    assert_eq!(
+        seg.get_type_at_address(0x1204),
+        ghidra_hopper_rs::segment::ByteType::Undefined
+    );
+    assert!(!seg.refs_from.contains_key(&0x1208));
+    assert!(seg.refs_from[&0x1200].contains(&0x1250));
+}
