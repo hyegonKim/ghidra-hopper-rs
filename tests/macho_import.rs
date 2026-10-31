@@ -305,3 +305,66 @@ fn fat_slice_offsets_and_explicit_switch_overrides_remain_correct() {
         .flat_map(|b| &b.instructions)
         .all(|i| !matches!(i.pcode.first(), Some(PcodeOp::MachOImportTailCall { .. }))));
 }
+
+#[test]
+fn only_platform_stack_failure_import_is_nonreturning() {
+    for platform in [false, true] {
+        let mut b = fixture();
+        let symbol = b"\0___stack_chk_fail\0";
+        b[0x540..0x560].fill(0);
+        b[0x540..0x540 + symbol.len()].copy_from_slice(symbol);
+        if platform {
+            let library = b"/usr/lib/libSystem.B.dylib\0";
+            b[464..496].fill(0);
+            b[464..464 + library.len()].copy_from_slice(library);
+        }
+        p32(&mut b, 0x210, 0x97fffffc);
+        p32(&mut b, 0x214, 0xd65f03c0);
+        let (_, proc) = analyze(&b, 0x1210, 16);
+        assert!(!proc.is_incomplete());
+        assert_eq!(
+            proc.basic_blocks
+                .iter()
+                .map(|bb| bb.instructions.len())
+                .sum::<usize>(),
+            if platform { 1 } else { 2 }
+        );
+        assert_eq!(
+            matches!(
+                proc.basic_blocks[0].instructions[0].pcode[0],
+                PcodeOp::NoReturnCall { .. }
+            ),
+            platform
+        );
+    }
+}
+
+#[test]
+fn function_start_metadata_is_bounded_uleb_and_preserves_slice_addresses() {
+    let mut b = fixture();
+    p32(&mut b, 16, 6);
+    p32(&mut b, 20, 480);
+    p32(&mut b, 496, 0x26);
+    p32(&mut b, 500, 16);
+    p32(&mut b, 504, 0x5c0);
+    p32(&mut b, 508, 8);
+    b[0x5c0..0x5c4].copy_from_slice(&[0x80, 4, 0x10, 0]);
+    let image = MachOImage::parse(&b).unwrap();
+    assert_eq!(
+        image.segments[0].function_starts,
+        std::collections::BTreeSet::from([0x1200, 0x1210])
+    );
+    let mut corrupt = b.clone();
+    p32(&mut corrupt, 508, 1);
+    assert!(MachOImage::parse(&corrupt).is_err());
+    let mut corrupt = b.clone();
+    corrupt[0x5c3] = 1;
+    assert!(MachOImage::parse(&corrupt).is_err());
+    let mut corrupt = b.clone();
+    p32(&mut corrupt, 508, 11);
+    corrupt[0x5c0..0x5ca].fill(0x80);
+    assert!(MachOImage::parse(&corrupt).is_err());
+    let mut corrupt = b;
+    p32(&mut corrupt, 504, u32::MAX);
+    assert!(MachOImage::parse(&corrupt).is_err());
+}

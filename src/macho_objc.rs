@@ -42,6 +42,7 @@ pub struct ObjCMetadata {
 
 #[derive(Debug, Clone)]
 pub struct PltBinding {
+    pub instructions: [u32; 4],
     pub stub_address: u64,
     pub branch_address: u64,
     pub got_address: u64,
@@ -136,6 +137,51 @@ fn validate_table(
     Ok(())
 }
 
+fn record_function_starts(data: &[u8], base: u64, segments: &mut [Segment]) -> Result<(), String> {
+    let mut cursor = 0;
+    let mut address = base;
+    while cursor < data.len() {
+        let mut delta = 0u64;
+        let mut shift = 0;
+        loop {
+            let byte = *data.get(cursor).ok_or("Truncated function-start ULEB128")?;
+            cursor += 1;
+            if shift > 63 || (shift == 63 && byte & 0x7f > 1) {
+                return Err("Function-start ULEB128 overflow".into());
+            }
+            delta |= ((byte & 127) as u64) << shift;
+            if byte & 128 == 0 {
+                break;
+            }
+            shift += 7;
+        }
+        if delta == 0 {
+            if data[cursor..].iter().any(|&b| b != 0) {
+                return Err("Invalid function-start padding".into());
+            }
+            return Ok(());
+        }
+        address = address
+            .checked_add(delta)
+            .ok_or("Function-start address overflow")?;
+        if !address.is_multiple_of(4) {
+            return Err("Unaligned ARM64 function start".into());
+        }
+        let segment = segments
+            .iter_mut()
+            .find(|s| {
+                s.permissions.is_some_and(|p| p & 4 != 0) && s.read_bytes(address, 4).is_some()
+            })
+            .ok_or("Function start outside executable mapping")?;
+        segment.function_starts.insert(address);
+    }
+    if data.is_empty() {
+        Ok(())
+    } else {
+        Err("Unterminated function-start table".into())
+    }
+}
+
 impl MachOImage {
     /// Parses either a Universal Mach-O (`0xCAFEBABE`) or a thin 64-bit Mach-O (`0xFEEDFACF`),
     /// preferring the `arm64` slice on Apple Silicon just like Hopper Disassembler.
@@ -227,6 +273,7 @@ impl MachOImage {
         let mut segments = Vec::new();
         let mut entry_point = None;
         let mut text_vmaddr = 0u64;
+        let mut function_start_data = None;
 
         let mut objc = ObjCMetadata {
             macho_imports: BTreeMap::new(),
@@ -315,6 +362,13 @@ impl MachOImage {
             } else if cmd == LC_MAIN && cmdsize >= 24 {
                 let entryoff = read_u64_le(slice, cmd_offset + 8).unwrap_or(0);
                 entry_point = Some(entryoff);
+            } else if cmd == 0x26 {
+                if cmdsize < 16 || function_start_data.is_some() {
+                    return Err("Invalid LC_FUNCTION_STARTS command".into());
+                }
+                let off = read_u32_le(slice, cmd_offset + 8).unwrap() as usize;
+                let size = read_u32_le(slice, cmd_offset + 12).unwrap() as usize;
+                function_start_data = Some(checked_range(off, size, slice.len())?);
             }
 
             cmd_offset += cmdsize as usize;
@@ -415,6 +469,9 @@ impl MachOImage {
         }
 
         if selected_arch == "arm64" {
+            if let Some(range) = function_start_data {
+                record_function_starts(&slice[range], text_vmaddr, &mut segments)?;
+            }
             objc.macho_imports = imports::resolve(slice, &segments)?;
             for binding in objc.macho_imports.values() {
                 objc.symbols
@@ -643,6 +700,14 @@ impl MachOImage {
             let base = i * 24;
             let st_name = read_u32_le(dynsym, base).unwrap_or(0) as usize;
             let st_value = read_u64_le(dynsym, base + 8).unwrap_or(0);
+            if dynsym[base + 4] & 15 == 2
+                && read_u16_le(dynsym, base + 6).unwrap_or(0) != 0
+                && st_value != 0
+            {
+                if let Some(segment) = segments.iter_mut().find(|s| s.contains(st_value)) {
+                    segment.function_starts.insert(st_value);
+                }
+            }
             let name = if st_name < dynstr.len() {
                 clean_fixed_str(&dynstr[st_name..])
             } else {
@@ -751,6 +816,7 @@ impl MachOImage {
                     objc.plt_bindings.insert(
                         branch_address,
                         PltBinding {
+                            instructions: [a, l, add, br],
                             stub_address: pc,
                             branch_address,
                             got_address: got,

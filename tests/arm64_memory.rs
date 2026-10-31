@@ -179,7 +179,7 @@ fn mov_zero_register_and_bti_are_explicit() {
 
 #[test]
 fn unsupported_and_unpredictable_variants_still_stop() {
-    for word in [0xad000400, 0xa9c00400, 0xa9400000, 0x69400400, 0xb9800000] {
+    for word in [0xad000400, 0xa9c00400, 0xa9400000, 0x69400400, 0x39800000] {
         assert!(
             matches!(decode(word).pcode[0], PcodeOp::Unsupported { .. }),
             "{word:x}"

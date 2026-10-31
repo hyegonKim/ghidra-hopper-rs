@@ -175,10 +175,11 @@ pub fn decode(address: u64, word: u32) -> Option<DecodedInstruction> {
     // Integer unsigned immediate LDR/STR, including byte/halfword zero-extending loads.
     if word & 0x3f000000 == 0x39000000 {
         let opc = (word >> 22) & 3;
-        if opc > 1 {
+        let size = 1u8 << ((word >> 30) & 3);
+        let signed_word = opc == 2 && size == 4;
+        if opc > 1 && !signed_word {
             return None;
         }
-        let size = 1u8 << ((word >> 30) & 3);
         let rt = (word & 31) as u64;
         let rn = ((word >> 5) & 31) as u64;
         let displacement = ((word >> 10) & 4095) as u64 * size as u64;
@@ -189,14 +190,21 @@ pub fn decode(address: u64, word: u32) -> Option<DecodedInstruction> {
             rhs: Varnode::imm(displacement, 8),
         }];
         // Memory width and architectural register write width are distinct for LDRB/H.
-        if opc == 1 {
+        if opc == 1 || signed_word {
             ops.push(PcodeOp::Load {
                 dst: temp(1, size),
                 addr: a,
             });
-            ops.push(PcodeOp::ZeroExtend {
-                dst: write_reg(rt, if size == 8 { 8 } else { 4 }),
-                src: temp(1, size),
+            ops.push(if signed_word {
+                PcodeOp::SignExtend {
+                    dst: write_reg(rt, 8),
+                    src: temp(1, 4),
+                }
+            } else {
+                PcodeOp::ZeroExtend {
+                    dst: write_reg(rt, if size == 8 { 8 } else { 4 }),
+                    src: temp(1, size),
+                }
             });
         } else {
             ops.push(PcodeOp::Store {
@@ -205,6 +213,7 @@ pub fn decode(address: u64, word: u32) -> Option<DecodedInstruction> {
             });
         }
         let mnemonic = match (opc, size) {
+            (2, 4) => "ldrsw",
             (0, 1) => "strb",
             (0, 2) => "strh",
             (0, _) => "str",
@@ -217,7 +226,7 @@ pub fn decode(address: u64, word: u32) -> Option<DecodedInstruction> {
             word,
             mnemonic,
             vec![
-                name(rt, if size == 8 { 8 } else { 4 }),
+                name(rt, if size == 8 || signed_word { 8 } else { 4 }),
                 format!(
                     "[{}, #{}]",
                     Varnode::reg(rn, 8).display_arm64(),
@@ -228,14 +237,15 @@ pub fn decode(address: u64, word: u32) -> Option<DecodedInstruction> {
         ));
     }
     // Integer unscaled / pre-index / post-index immediate single transfers.
-    // Unprivileged encodings (mode 2), sign-extending and SIMD variants remain unsupported.
+    // Unprivileged encodings (mode 2), signed byte/halfword and SIMD remain unsupported.
     if word & 0x3f200000 == 0x38000000 {
         let opc = (word >> 22) & 3;
         let mode = (word >> 10) & 3;
-        if opc > 1 || mode == 2 {
+        let size = 1u8 << ((word >> 30) & 3);
+        let signed_word = opc == 2 && size == 4;
+        if (opc > 1 && !signed_word) || mode == 2 {
             return None;
         }
-        let size = 1u8 << ((word >> 30) & 3);
         let rt = (word & 31) as u64;
         let rn = ((word >> 5) & 31) as u64;
         if mode != 0 && rn != 31 && rt == rn {
@@ -250,14 +260,21 @@ pub fn decode(address: u64, word: u32) -> Option<DecodedInstruction> {
             lhs: base,
             rhs: Varnode::imm(if mode == 1 { 0 } else { displacement as u64 }, 8),
         }];
-        if opc == 1 {
+        if opc == 1 || signed_word {
             ops.push(PcodeOp::Load {
                 dst: temp(1, size),
                 addr: a,
             });
-            ops.push(PcodeOp::ZeroExtend {
-                dst: write_reg(rt, if size == 8 { 8 } else { 4 }),
-                src: temp(1, size),
+            ops.push(if signed_word {
+                PcodeOp::SignExtend {
+                    dst: write_reg(rt, 8),
+                    src: temp(1, 4),
+                }
+            } else {
+                PcodeOp::ZeroExtend {
+                    dst: write_reg(rt, if size == 8 { 8 } else { 4 }),
+                    src: temp(1, size),
+                }
             });
         } else {
             ops.push(PcodeOp::Store {
@@ -273,6 +290,8 @@ pub fn decode(address: u64, word: u32) -> Option<DecodedInstruction> {
             });
         }
         let mnemonic = match (mode == 0, opc, size) {
+            (true, 2, 4) => "ldursw",
+            (false, 2, 4) => "ldrsw",
             (true, 0, 1) => "sturb",
             (true, 0, 2) => "sturh",
             (true, 0, _) => "stur",
@@ -295,7 +314,10 @@ pub fn decode(address: u64, word: u32) -> Option<DecodedInstruction> {
             address,
             word,
             mnemonic,
-            vec![name(rt, if size == 8 { 8 } else { 4 }), memory],
+            vec![
+                name(rt, if size == 8 || signed_word { 8 } else { 4 }),
+                memory,
+            ],
             ops,
         ));
     }

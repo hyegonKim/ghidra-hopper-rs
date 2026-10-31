@@ -173,6 +173,7 @@ pub struct Section {
 /// Memory Segment combining Ghidra's MemoryBlock with Hopper's flat O(1) `Vec<ByteType>`.
 #[derive(Debug, Clone)]
 pub struct Segment {
+    pub function_starts: BTreeSet<u64>,
     pub name: String,
     /// Loader permissions, normalized to read=1, write=2, execute=4.
     /// Synthetic segments default to unknown.
@@ -202,6 +203,7 @@ impl Segment {
     ) -> Self {
         let len = bytes.len();
         Self {
+            function_starts: BTreeSet::new(),
             name: name.into(),
             permissions: None,
             start_address,
@@ -229,6 +231,28 @@ impl Segment {
     #[inline]
     pub fn contains(&self, addr: u64) -> bool {
         addr >= self.start_address && (addr - self.start_address) < self.length()
+    }
+
+    /// A declared entry or section boundary requires an explicit transfer;
+    /// ordinary fall-through is uncertain, not an invented tail call.
+    pub fn allows_fallthrough(&self, from: u64, to: u64) -> bool {
+        if self.function_starts.contains(&to) {
+            return false;
+        }
+        self.sections
+            .iter()
+            .filter(|s| {
+                from >= s.start_address
+                    && s.start_address
+                        .checked_add(s.length)
+                        .is_some_and(|end| from.checked_add(4).is_some_and(|last| last <= end))
+            })
+            .all(|s| {
+                to >= s.start_address
+                    && s.start_address
+                        .checked_add(s.length)
+                        .is_some_and(|end| to.checked_add(4).is_some_and(|last| last <= end))
+            })
     }
 
     #[inline]

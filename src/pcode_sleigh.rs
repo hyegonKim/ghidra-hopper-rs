@@ -102,6 +102,36 @@ pub enum BitfieldKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PcodeOp {
+    UnverifiedContinuation {
+        target: u64,
+    },
+    MoveKeep {
+        dst: Varnode,
+        old: Varnode,
+        immediate: u16,
+        shift: u8,
+    },
+    ConditionalSelect {
+        dst: Varnode,
+        if_true: Varnode,
+        if_false: Varnode,
+        condition: crate::arm64_flags::Condition,
+    },
+    SignExtend {
+        dst: Varnode,
+        src: Varnode,
+    },
+    LoadAcquire {
+        dst: Varnode,
+        addr: Varnode,
+    },
+    ReadThreadPointer {
+        dst: Varnode,
+    },
+    NoReturnCall {
+        target: u64,
+        symbol: String,
+    },
     /// Bounded unsigned-halfword relative table, with the original index mapping.
     TableBranch {
         target_reg: Varnode,
@@ -238,6 +268,31 @@ pub enum PcodeOp {
     Nop,
 }
 
+impl PcodeOp {
+    /// Value output, including unique temporaries; NZCV/ABI effects are separate.
+    pub fn value_destination(&self) -> Option<Varnode> {
+        match self {
+            Self::Copy { dst, .. }
+            | Self::IntAdd { dst, .. }
+            | Self::IntSub { dst, .. }
+            | Self::IntAnd { dst, .. }
+            | Self::IntOr { dst, .. }
+            | Self::IntEqual { dst, .. }
+            | Self::ZeroExtend { dst, .. }
+            | Self::Load { dst, .. }
+            | Self::Bitfield { dst, .. }
+            | Self::RegisterOffset { dst, .. }
+            | Self::MoveKeep { dst, .. }
+            | Self::ConditionalSelect { dst, .. }
+            | Self::SignExtend { dst, .. }
+            | Self::LoadAcquire { dst, .. }
+            | Self::ReadThreadPointer { dst, .. } => Some(*dst),
+            Self::ShiftedAdd { dst, .. } | Self::FlagArithmetic { dst, .. } => *dst,
+            _ => None,
+        }
+    }
+}
+
 /// Decoded native instruction + lifted Ghidra P-Code micro-operations.
 #[derive(Debug, Clone)]
 pub struct DecodedInstruction {
@@ -283,6 +338,9 @@ fn decode_arm64_inner(
     objc_stubs: &BTreeMap<u64, String>,
     switch_hints: &SwitchHintTable,
 ) -> DecodedInstruction {
+    if let Some(insn) = crate::arm64_data::decode(addr, word) {
+        return insn;
+    }
     if let Some(insn) = crate::arm64_address::decode(addr, word, seg) {
         return insn;
     }
@@ -521,7 +579,7 @@ fn decode_arm64_inner(
     }
 
     // 9. ADD / SUB (immediate) Xd, Xn, #<imm12>
-    if (word & 0x1f000000) == 0x11000000 && word & (1 << 29) == 0 {
+    if (word & 0x1f800000) == 0x11000000 && word & (1 << 29) == 0 {
         let is_64 = (word >> 31) != 0;
         let is_sub = ((word >> 30) & 1) != 0;
         let rd = (word & 0x1f) as u64;
@@ -632,7 +690,22 @@ pub fn decompile_instructions_to_pseudocode_with_aliases(
         }
         out.push_str(&format!("loc_{:x}:\n", insn.address));
         for op in &insn.pcode {
+            if !matches!(op, PcodeOp::Copy { .. } | PcodeOp::IntAdd { .. }) {
+                if let Some(dst) = op
+                    .value_destination()
+                    .filter(|d| d.space == SpaceKind::Register)
+                {
+                    reg_consts.remove(&dst.offset);
+                }
+            }
             match op {
+                PcodeOp::UnverifiedContinuation{target} => {reg_consts.clear(); out.push_str(&format!("    // INCOMPLETE: fall-through to 0x{target:x} crosses a declared function/section boundary; continuation unverified\n"));},
+                PcodeOp::MoveKeep{dst,old,immediate,shift} => out.push_str(&format!("    {} = arm64_movk_u{}({}, 0x{immediate:x}, {shift}); // NZCV preserved\n",dst.display_arm64_with_aliases(reg_aliases),dst.size*8,old.display_arm64_with_aliases(reg_aliases))),
+                PcodeOp::ConditionalSelect{dst,if_true,if_false,condition} => out.push_str(&format!("    {} = select_u{}({}, {}, {}); // NZCV preserved\n",dst.display_arm64_with_aliases(reg_aliases),dst.size*8,condition.expression(),if_true.display_arm64_with_aliases(reg_aliases),if_false.display_arm64_with_aliases(reg_aliases))),
+                PcodeOp::SignExtend{dst,src} => out.push_str(&format!("    {} = sign_extend_i{}({});\n",dst.display_arm64_with_aliases(reg_aliases),src.size*8,src.display_arm64_with_aliases(reg_aliases))),
+                PcodeOp::LoadAcquire{dst,addr} => out.push_str(&format!("    {} = atomic_load_acquire_u{}({}); // acquire ordering; NZCV preserved\n",dst.display_arm64_with_aliases(reg_aliases),dst.size*8,addr.display_arm64_with_aliases(reg_aliases))),
+                PcodeOp::ReadThreadPointer{dst} => out.push_str(&format!("    {} = read_thread_pointer(TPIDR_EL0); // runtime per-thread value; NZCV preserved\n",dst.display_arm64_with_aliases(reg_aliases))),
+                PcodeOp::NoReturnCall{target,symbol} => out.push_str(&format!("    call_noreturn({symbol:?}, stub=0x{target:x});\n")),
                 PcodeOp::ShiftedAdd{dst,lhs,rhs,shift,amount}=>{
                     if let Some(dst)=dst {reg_consts.remove(&dst.offset);}
                     let result=dst.map(|dst|dst.display_arm64_with_aliases(reg_aliases)).unwrap_or_else(||"discard".into());

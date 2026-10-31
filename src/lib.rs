@@ -1,5 +1,6 @@
 pub mod arm64_address;
 pub mod arm64_bitfield;
+pub mod arm64_data;
 pub mod arm64_flags;
 pub mod arm64_indexed;
 mod arm64_jump_table;

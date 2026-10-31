@@ -276,15 +276,46 @@ impl HopperHybridObjcAnalyzerRs {
         // 2. Decode & Lift ARM64 instructions + build Hopper ByteType states & BasicBlock CFG
         let stubs = prog.objc_stub_selectors.clone();
         let hints = prog.switch_hints.clone();
+        let mut nonreturning = BTreeMap::new();
+        for binding in prog
+            .plt_bindings
+            .values()
+            .filter(|b| b.symbol == "__stack_chk_fail")
+        {
+            if binding.instructions.iter().enumerate().all(|(n, word)| {
+                prog.segment_at(binding.stub_address)
+                    .and_then(|s| s.read_u32_le(binding.stub_address + n as u64 * 4))
+                    == Some(*word)
+            }) {
+                nonreturning.insert(binding.stub_address, binding.symbol.clone());
+            }
+        }
+        for binding in prog.macho_imports.values().filter(|b| {
+            b.symbol == "___stack_chk_fail" && b.library == "/usr/lib/libSystem.B.dylib"
+        }) {
+            if binding.instructions.iter().enumerate().all(|(n, word)| {
+                prog.segment_at(binding.stub_address)
+                    .and_then(|s| s.read_u32_le(binding.stub_address + n as u64 * 4))
+                    == Some(*word)
+            }) {
+                nonreturning.insert(binding.stub_address, binding.symbol.clone());
+            }
+        }
         let mut proc = {
             let seg = prog
                 .segment_at_mut(entry_addr)
                 .expect("Function entry must be in a loaded segment");
-            Procedure::analyze_arm64(func_name, entry_addr, max_insns, seg, &stubs, &hints)
+            Procedure::analyze_arm64_with_imports(
+                func_name,
+                entry_addr,
+                max_insns,
+                seg,
+                &stubs,
+                &hints,
+                &nonreturning,
+            )
         };
         for bb in &mut proc.basic_blocks {
-            let decoded_addresses: std::collections::BTreeSet<_> =
-                bb.instructions.iter().map(|i| i.address).collect();
             let decoded_words: BTreeMap<_, _> = bb
                 .instructions
                 .iter()
@@ -350,8 +381,9 @@ impl HopperHybridObjcAnalyzerRs {
                     prog.eol_comments.insert(insn.address, format!("Verified u16 relative table at 0x{table_address:x}: {} entries, scale 4", targets.len()));
                 }
                 if let Some(binding) = prog.plt_bindings.get(&insn.address).cloned() {
-                    if !(0..4).all(|i| decoded_addresses.contains(&(binding.stub_address + i * 4)))
-                    {
+                    if !binding.instructions.iter().enumerate().all(|(n, word)| {
+                        decoded_words.get(&(binding.stub_address + n as u64 * 4)) == Some(word)
+                    }) {
                         continue;
                     }
                     if matches!(insn.pcode.first(),Some(crate::pcode_sleigh::PcodeOp::BranchInd{target_reg,..}) if target_reg.offset==17)
@@ -511,7 +543,15 @@ impl HopperHybridObjcAnalyzerRs {
                                         .collect(),
                                 });
                             }
-                            _ => {}
+                            _ => {
+                                if let Some(dst) = op
+                                    .value_destination()
+                                    .filter(|d| d.space == crate::pcode_sleigh::SpaceKind::Register)
+                                {
+                                    reg_consts.remove(&dst.offset);
+                                    reg_strings.remove(&dst.offset);
+                                }
+                            }
                         }
                     }
                     if insn.is_call {

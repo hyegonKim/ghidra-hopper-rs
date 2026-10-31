@@ -1,5 +1,7 @@
 # ghidra-hopper-rs (v0.3.0)
 
+> **다른 진입점 확장·정확성 수정 / 2026-10-31:** MOVN/MOVK, CSEL, immediate·unscaled·pre/post LDRSW, TPIDR_EL0 읽기, 일반 레지스터 목적지의 32/64비트 LDAR를 구현했습니다. LDAR의 acquire 속성과 런타임 thread-pointer 값을 IR에 명시합니다. 함수 경계를 넘는 가짜 fall-through, 비반환 import 뒤의 탐색, 변경된 ELF PLT의 오래된 binding, SUB 뒤 문자열 추론과 ADDG/SUBG 오해석을 수정했습니다. 기존 Hopper main의 1,124개·종료 코드 0에는 무관한 import stub이 포함되어 있었습니다. 이를 1,121개·INCOMPLETE로 바로잡았으며 개별 import 해석은 유지합니다. 29개 진입점 × 세 예산의 87쌍, 네이티브 ARM64 1,713건, 전체 테스트 103개와 릴리스 24개를 검증했습니다. [조건·결과·정정·남은 미지원·재현 절차](validation/other_entries/REPORT.md).
+
 > **Mach-O BR x16 import 해석 / 2026-10-31:** canonical ADRP/LDR/BR stub과 포인터 슬롯의 간접 심볼 인덱스, nlist undefined 심볼·라이브러리 ordinal을 대조해 외부 꼬리 호출로 표현합니다. Hopper `0x100003f68`은 슬롯 `0x100008130`을 통한 CoreFoundation의 `_CFRunLoopGetCurrent`로 식별됩니다. 같은 파일·진입점·예산에서 탐색량은 128→128개, 512→512개, 1,124→1,124개이며, 2,048개 예산의 마지막 미해결 분기가 해소되어 종료 코드가 2→0으로 바뀝니다. 출력은 여전히 지원 범위 분석임을 명시하며 외부 함수 본문·런타임 주소·시그니처까지 복원한 것은 아닙니다. 잘못된 연결과 stub 중간 진입은 미해결 상태를 유지합니다.
 
 > **BR 점프 테이블 자동 복원 / 2026-10-31:** CMP/B.HI의 인덱스 범위, ADR·LDRH·shifted ADD·BR의 데이터 흐름, 읽기 전용 테이블과 코드 대상 범위를 검증해 unsigned halfword 상대 테이블을 복원합니다. 중복 항목을 원래 인덱스에 보존하고 CFG 간선·참조는 고유 대상별로 생성하며, 새 역방향 경로가 근거를 깨면 복원을 취소합니다. 같은 Hopper·진입점·예산에서 128개는 128→128개, 512개는 512→512개(예산 상한), 2,048개는 747→1,124개입니다. `BR x9`의 58개 항목·30개 고유 대상을 복원했으며 `BR x16`(`0x100003f68`)은 미해결로 `INCOMPLETE`를 유지합니다.

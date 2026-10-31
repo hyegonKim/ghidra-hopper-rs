@@ -217,3 +217,68 @@ fn jumping_into_middle_of_plt_does_not_prove_got_load() {
     );
     assert!(proc.is_incomplete());
 }
+
+#[test]
+fn changed_plt_code_cannot_reuse_loaded_binding_metadata() {
+    let image = MachOImage::parse(&elf()).unwrap();
+    let mut prog = GhidraProgram::from_macho_image("changed", &image);
+    p32(&mut prog.segments[0].data, 0x404, 0xd503201f);
+    let proc = HopperHybridObjcAnalyzerRs::new().analyze_function_zero_ipc(
+        &mut prog,
+        "changed",
+        0x1400,
+        16,
+        &[],
+    );
+    assert!(proc.is_incomplete());
+    assert!(matches!(
+        proc.basic_blocks[0].instructions[3].pcode[0],
+        PcodeOp::BranchInd { .. }
+    ));
+}
+
+#[test]
+fn stack_failure_call_stops_before_adjacent_function_only_with_live_binding() {
+    let mut b = elf();
+    let names = b"\0__stack_chk_fail\0bar\0";
+    b[0x280..0x280 + names.len()].copy_from_slice(names);
+    p64(&mut b, 128 + 2 * 64 + 32, names.len() as u64);
+    p32(&mut b, 0x330, 18);
+    for (at, w) in [
+        (0x200, 0x94000080),
+        (0x204, 0x52800020),
+        (0x208, 0xd65f03c0),
+    ] {
+        p32(&mut b, at, w);
+    }
+    let image = MachOImage::parse(&b).unwrap();
+    let mut prog = GhidraProgram::from_macho_image("fail", &image);
+    let proc = HopperHybridObjcAnalyzerRs::new().analyze_function_zero_ipc(
+        &mut prog,
+        "fail",
+        0x1200,
+        16,
+        &[],
+    );
+    assert_eq!(proc.basic_blocks[0].instructions.len(), 1);
+    assert!(proc.basic_blocks[0].successors.is_empty());
+    assert!(!proc.is_incomplete());
+    assert!(matches!(
+        proc.basic_blocks[0].instructions[0].pcode[0],
+        PcodeOp::NoReturnCall { .. }
+    ));
+    let mut prog = GhidraProgram::from_macho_image("changed", &image);
+    p32(&mut prog.segments[0].data, 0x404, 0xd503201f);
+    let proc = HopperHybridObjcAnalyzerRs::new().analyze_function_zero_ipc(
+        &mut prog,
+        "changed",
+        0x1200,
+        16,
+        &[],
+    );
+    assert_eq!(proc.basic_blocks[0].instructions.len(), 3);
+    assert!(!matches!(
+        proc.basic_blocks[0].instructions[0].pcode[0],
+        PcodeOp::NoReturnCall { .. }
+    ));
+}

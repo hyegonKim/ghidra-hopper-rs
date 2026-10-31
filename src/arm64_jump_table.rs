@@ -35,7 +35,12 @@ pub(crate) fn successors(i: &DecodedInstruction) -> Vec<u64> {
     if !i.is_call {
         out.extend(i.branch_target);
     }
-    if !i.is_unconditional_jump {
+    if !i.is_unconditional_jump
+        && !i
+            .pcode
+            .iter()
+            .any(|op| matches!(op, PcodeOp::UnverifiedContinuation { .. }))
+    {
         out.extend(i.address.checked_add(4));
     }
     out
@@ -52,20 +57,7 @@ fn predecessors(decoded: &Instructions) -> Predecessors {
 }
 
 fn destination(op: &PcodeOp) -> Option<Varnode> {
-    match op {
-        PcodeOp::Copy { dst, .. }
-        | PcodeOp::IntAdd { dst, .. }
-        | PcodeOp::IntSub { dst, .. }
-        | PcodeOp::IntAnd { dst, .. }
-        | PcodeOp::IntOr { dst, .. }
-        | PcodeOp::IntEqual { dst, .. }
-        | PcodeOp::ZeroExtend { dst, .. }
-        | PcodeOp::Load { dst, .. }
-        | PcodeOp::Bitfield { dst, .. }
-        | PcodeOp::RegisterOffset { dst, .. } => Some(*dst),
-        PcodeOp::ShiftedAdd { dst, .. } | PcodeOp::FlagArithmetic { dst, .. } => *dst,
-        _ => None,
-    }
+    op.value_destination()
 }
 
 struct Proof<'a> {

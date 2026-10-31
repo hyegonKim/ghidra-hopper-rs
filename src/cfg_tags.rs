@@ -38,6 +38,26 @@ impl Procedure {
         objc_stubs: &BTreeMap<u64, String>,
         switch_hints: &SwitchHintTable,
     ) -> Self {
+        Self::analyze_arm64_with_imports(
+            name,
+            entry_address,
+            max_instructions,
+            seg,
+            objc_stubs,
+            switch_hints,
+            &BTreeMap::new(),
+        )
+    }
+
+    pub(crate) fn analyze_arm64_with_imports(
+        name: impl Into<String>,
+        entry_address: u64,
+        max_instructions: usize,
+        seg: &mut Segment,
+        objc_stubs: &BTreeMap<u64, String>,
+        switch_hints: &SwitchHintTable,
+        nonreturning: &BTreeMap<u64, String>,
+    ) -> Self {
         let proc_name = name.into();
         seg.set_name_at_address(entry_address, proc_name.clone());
 
@@ -58,7 +78,19 @@ impl Procedure {
                 let Some(word) = seg.read_u32_le(cursor) else {
                     continue;
                 };
-                let insn = decode_and_lift_arm64(cursor, word, seg, objc_stubs, switch_hints);
+                let mut insn = decode_and_lift_arm64(cursor, word, seg, objc_stubs, switch_hints);
+                if insn.is_call {
+                    if let Some((target, symbol)) = insn
+                        .branch_target
+                        .and_then(|target| nonreturning.get(&target).map(|name| (target, name)))
+                    {
+                        insn.pcode = vec![crate::pcode_sleigh::PcodeOp::NoReturnCall {
+                            target,
+                            symbol: symbol.clone(),
+                        }];
+                        insn.is_unconditional_jump = true;
+                    }
+                }
                 if matches!(
                     insn.pcode.first(),
                     Some(crate::pcode_sleigh::PcodeOp::Unsupported { .. })
@@ -79,7 +111,14 @@ impl Procedure {
                     }
                 }
                 if !insn.is_ret && !insn.is_unconditional_jump {
-                    pending.insert(next);
+                    if seg.allows_fallthrough(cursor, next) {
+                        pending.insert(next);
+                    } else {
+                        insn.pcode
+                            .push(crate::pcode_sleigh::PcodeOp::UnverifiedContinuation {
+                                target: next,
+                            });
+                    }
                 }
                 decoded.insert(cursor, insn);
             }
@@ -142,7 +181,16 @@ impl Procedure {
                     block_leaders.insert(target);
                 }
             }
-            if insn.is_ret || insn.is_conditional_jump || insn.is_unconditional_jump {
+            if insn.is_ret
+                || insn.is_conditional_jump
+                || insn.is_unconditional_jump
+                || insn.pcode.iter().any(|op| {
+                    matches!(
+                        op,
+                        crate::pcode_sleigh::PcodeOp::UnverifiedContinuation { .. }
+                    )
+                })
+            {
                 block_leaders.extend(pc.checked_add(4));
             }
         }
@@ -231,10 +279,13 @@ impl Procedure {
         self.basic_blocks.is_empty()
             || self.basic_blocks.iter().any(|bb| {
                 bb.instructions.iter().any(|i| {
-                    matches!(
-                        i.pcode.first(),
-                        Some(crate::pcode_sleigh::PcodeOp::Unsupported { .. })
-                    )
+                    i.pcode.iter().any(|op| {
+                        matches!(
+                            op,
+                            crate::pcode_sleigh::PcodeOp::Unsupported { .. }
+                                | crate::pcode_sleigh::PcodeOp::UnverifiedContinuation { .. }
+                        )
+                    })
                 }) || bb.successors.iter().any(|target| !starts.contains(target))
                     || bb.instructions.last().is_some_and(|i| {
                         i.is_unconditional_jump
@@ -395,7 +446,14 @@ fn compute_successors(insns: &[DecodedInstruction], fallthrough: Option<u64>) ->
             out.push(target);
         }
     }
-    if !last.is_unconditional_jump {
+    if !last.is_unconditional_jump
+        && !last.pcode.iter().any(|op| {
+            matches!(
+                op,
+                crate::pcode_sleigh::PcodeOp::UnverifiedContinuation { .. }
+            )
+        })
+    {
         if let Some(ft) = fallthrough {
             if !out.contains(&ft) {
                 out.push(ft);
