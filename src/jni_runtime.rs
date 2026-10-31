@@ -18,6 +18,8 @@ pub fn operation(slot: u16) -> Option<&'static str> {
     match slot {
         6 => Some("FindClass"),
         14 => Some("ThrowNew"),
+        229 => Some("NewDirectByteBuffer"),
+        230 => Some("GetDirectBufferAddress"),
         _ => None,
     }
 }
@@ -48,6 +50,7 @@ struct Target {
 }
 #[derive(Debug, Clone)]
 pub struct RuntimeSnapshot {
+    terminal_slot: u16,
     entry: u64,
     branch: u64,
     env: u64,
@@ -64,8 +67,12 @@ impl RuntimeSnapshot {
             return Err("Runtime evidence size limit".into());
         }
         let v: Value = serde_json::from_slice(profile).map_err(|e| e.to_string())?;
-        if v["schema"] != 1
-            || text(&v, "source")? != "android-art-process-private-brk"
+        let terminal_slot = match v["schema"].as_u64() {
+            Some(1) => 14,
+            Some(2) if v["terminal_jni_slot"] == 229 => 229,
+            _ => return Err("Unsupported JNI capture schema/terminal slot".into()),
+        };
+        if text(&v, "source")? != "android-art-process-private-brk"
             || text(&v, "abi")? != "arm64-v8a"
         {
             return Err("Unsupported JNI capture schema/source/ABI".into());
@@ -142,7 +149,12 @@ impl RuntimeSnapshot {
             })
         };
         if !mapped(env, 8, b'r', None)
-            || !mapped(table, 15 * 8, b'r', None)
+            || !mapped(
+                table,
+                if terminal_slot == 14 { 15 * 8 } else { 231 * 8 },
+                b'r',
+                None,
+            )
             || !mapped(
                 ptr(&v, "entry")?,
                 4,
@@ -159,18 +171,36 @@ impl RuntimeSnapshot {
             return Err("JNI environment/table/code not covered by runtime maps".into());
         }
         let calls = &v["calls"];
-        if calls["uninstrumented"] != 0
-            || calls["instrumented"] != 0
-            || calls["trap_hits"] != 1
-            || calls["exception_class"] != "java/io/IOException"
-            || calls["message_verified"] != true
-        {
+        if calls["uninstrumented"] != 0 || calls["instrumented"] != 0 || calls["trap_hits"] != 1 {
             return Err("Runtime execution/exception evidence did not pass".into());
+        }
+        if terminal_slot == 14 {
+            if calls["exception_class"] != "java/io/IOException"
+                || calls["message_verified"] != true
+            {
+                return Err("ThrowNew execution evidence did not pass".into());
+            }
+        } else {
+            let capacity = calls["source_capacity"]
+                .as_u64()
+                .filter(|n| *n > 0 && *n <= 1048576)
+                .ok_or("Invalid source buffer capacity")?;
+            let offset = calls["offset"].as_u64().ok_or("Invalid buffer offset")?;
+            let length = calls["length"].as_u64().ok_or("Invalid buffer length")?;
+            let source = ptr(calls, "source_address")?;
+            if calls["buffer_verified"] != true
+                || offset.checked_add(length).is_none_or(|n| n > capacity)
+                || source.checked_add(offset) != Some(ptr(&v, "x1")?)
+                || ptr(&v, "x2")? != length
+                || !mapped(source, capacity, b'r', None)
+            {
+                return Err("NewDirectByteBuffer address/capacity evidence did not pass".into());
+            }
         }
         let rows = v["slots"]
             .as_array()
             .filter(|a| a.len() == 2)
-            .ok_or("Expected JNI slots 6 and 14")?;
+            .ok_or("Expected exactly two captured JNI slots")?;
         let mut slots = BTreeMap::new();
         for row in rows {
             let slot = row["index"]
@@ -212,8 +242,16 @@ impl RuntimeSnapshot {
                 return Err("Duplicate JNI slot".into());
             }
         }
-        if slots[&14].address != ptr(&v, "x3")? {
-            return Err("Observed BR x3 disagrees with JNI ThrowNew".into());
+        let required = if terminal_slot == 14 {
+            [6, 14]
+        } else {
+            [229, 230]
+        };
+        if !slots.keys().copied().eq(required) {
+            return Err("Wrong JNI slot pair for capture schema".into());
+        }
+        if slots[&terminal_slot].address != ptr(&v, "x3")? {
+            return Err("Observed BR x3 disagrees with captured JNI operation".into());
         }
         let mut expected = BTreeMap::new();
         for s in &image.segments {
@@ -230,6 +268,7 @@ impl RuntimeSnapshot {
             return Err("Captured BR is not present in original ELF".into());
         }
         Ok(Self {
+            terminal_slot,
             entry,
             branch,
             env,
@@ -474,9 +513,9 @@ fn transfer(
                 if s.valid
                     && i.address == snapshot.branch
                     && s.regs[0] == Some(Abstract::Env(0))
-                    && get(*target_reg, &s, &t) == Some(Abstract::Function(14))
+                    && get(*target_reg, &s, &t) == Some(Abstract::Function(snapshot.terminal_slot))
                 {
-                    resolved = Some(14);
+                    resolved = Some(snapshot.terminal_slot);
                 }
             }
             _ => {}

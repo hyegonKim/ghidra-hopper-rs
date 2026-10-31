@@ -309,6 +309,17 @@ pub enum PcodeOp {
     CallInd {
         target: Varnode,
     },
+    /// External callback under an explicitly captured entry-argument context.
+    RuntimeTailCall {
+        target_reg: Varnode,
+        target: u64,
+    },
+    /// Observed non-callable target; never makes a procedure complete.
+    RuntimeInvalidBranch {
+        target_reg: Varnode,
+        target: u64,
+        signal: u8,
+    },
     /// JNI binding from explicit offline runtime evidence, scoped to that capture.
     RuntimeJniCall {
         target_reg: Varnode,
@@ -946,6 +957,11 @@ pub fn decompile_instructions_to_pseudocode_with_aliases(
                         target.display_arm64_with_aliases(reg_aliases)
                     ));
                 }
+                PcodeOp::RuntimeTailCall { target_reg, target } => {
+                    reg_consts.retain(|reg, _| *reg > 18);
+                    out.push_str(&format!("    tailcall_runtime(0x{target:x}, via={}); // supplied entry-argument context only; signature unknown; native return allowed\n",target_reg.display_arm64_with_aliases(reg_aliases)));
+                }
+                PcodeOp::RuntimeInvalidBranch { target_reg, target, signal } => out.push_str(&format!("    runtime_branch_fault(target=0x{target:x}, via={}, signal={signal}); // observed fault, not callable; INCOMPLETE retained\n",target_reg.display_arm64_with_aliases(reg_aliases))),
                 PcodeOp::RuntimeJniCall { target_reg, table, target, slot, tail } => {
                     reg_consts.retain(|reg, _| *reg > 18);
                     let operation = crate::jni_runtime::operation(*slot).unwrap_or("unknown");

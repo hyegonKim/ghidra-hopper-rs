@@ -16,4 +16,5 @@ pub mod jni_runtime;
 pub mod macho_objc;
 pub mod mcp_server;
 pub mod pcode_sleigh;
+pub mod runtime_branch;
 pub mod segment;

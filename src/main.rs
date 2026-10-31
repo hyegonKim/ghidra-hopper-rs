@@ -118,11 +118,12 @@ fn main() {
         if max_insns == 0 {
             fail("Instruction budget must be positive");
         }
-        let runtime_path = match args.get(6..) {
-            None | Some([]) => None,
-            Some([flag, path]) if flag == "--jni-runtime" => Some(path),
+        let (runtime_path, branch_context) = match args.get(6..) {
+            None | Some([]) => (None, false),
+            Some([flag, path]) if flag == "--jni-runtime" => (Some(path), false),
+            Some([flag, path]) if flag == "--branch-runtime" => (Some(path), true),
             _ => fail(
-                "Usage: decompile <binary> <name> <entry> <budget> [--jni-runtime <capture.json>]",
+                "Usage: decompile <binary> <name> <entry> <budget> [--jni-runtime <capture.json> | --branch-runtime <capture.json>]",
             ),
         };
 
@@ -183,14 +184,27 @@ fn main() {
                 fail("ART image size limit");
             }
             let art = fs::read(art_path).unwrap_or_else(|e| fail(e));
-            let snapshot =
-                ghidra_hopper_rs::jni_runtime::RuntimeSnapshot::parse(&profile, &raw_file, &art)
-                    .unwrap_or_else(|e| fail(e));
-            let count = snapshot
-                .resolve(&mut prog, &mut proc)
+            if branch_context {
+                let snapshot = ghidra_hopper_rs::runtime_branch::RuntimeBranchSnapshot::parse(
+                    &profile, &raw_file, &art,
+                )
                 .unwrap_or_else(|e| fail(e));
-            print!("{}", snapshot.summary());
-            println!("JNI runtime bindings applied: {count}");
+                let count = snapshot
+                    .resolve(&mut prog, &mut proc)
+                    .unwrap_or_else(|e| fail(e));
+                print!("{}", snapshot.summary());
+                println!("Runtime branch observations applied: {count}");
+            } else {
+                let snapshot = ghidra_hopper_rs::jni_runtime::RuntimeSnapshot::parse(
+                    &profile, &raw_file, &art,
+                )
+                .unwrap_or_else(|e| fail(e));
+                let count = snapshot
+                    .resolve(&mut prog, &mut proc)
+                    .unwrap_or_else(|e| fail(e));
+                print!("{}", snapshot.summary());
+                println!("JNI runtime bindings applied: {count}");
+            }
         }
         if let Some(first_bb) = proc.basic_blocks.first_mut() {
             first_bb

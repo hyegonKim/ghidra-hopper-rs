@@ -76,6 +76,106 @@ fn fixture() -> (Vec<u8>, Vec<u8>, Value) {
 fn parse(v: &Value, b: &[u8], art: &[u8]) -> RuntimeSnapshot {
     RuntimeSnapshot::parse(&serde_json::to_vec(v).unwrap(), b, art).unwrap()
 }
+fn buffer_fixture() -> (Vec<u8>, Vec<u8>, Value) {
+    let (mut b, art, mut v) = fixture();
+    for (n, w) in [
+        0xa9be57feu32,
+        0xa9014ff4,
+        0xf9400008,
+        0xaa0203e1,
+        0x2a0403f3,
+        0x2a0303f4,
+        0xaa0003f5,
+        0xf9439908,
+        0xd63f0100,
+        0xf94002a8,
+        0x8b34c001,
+        0x93407e62,
+        0xa9414ff4,
+        0xaa1503e0,
+        0xf9439503,
+        0xa8c257fe,
+        0xd61f0060,
+    ]
+    .iter()
+    .enumerate()
+    {
+        p32(&mut b, 0x200 + n * 4, *w);
+    }
+    v["schema"] = json!(2);
+    v["terminal_jni_slot"] = json!(229);
+    v["binary_sha256"] = json!(sha256(&b));
+    v["branch_pc"] = json!("0x60001240");
+    v["x1"] = json!("0x80000087");
+    v["x2"] = json!("0x1f");
+    v["x3"] = json!("0x70001200");
+    for (n, index, name) in [
+        (0, 229, "NewDirectByteBuffer"),
+        (1, 230, "GetDirectBufferAddress"),
+    ] {
+        v["slots"][n]["index"] = json!(index);
+        v["slots"][n]["name"] = json!(name);
+    }
+    v["calls"] = json!({"uninstrumented":0,"instrumented":0,"trap_hits":1,"buffer_verified":true,
+        "source_address":"0x80000080","source_capacity":128,"offset":7,"length":31});
+    (b, art, v)
+}
+#[test]
+fn direct_buffer_slots_require_actual_buffer_evidence_and_full_env_provenance() {
+    let (b, art, v) = buffer_fixture();
+    let s = parse(&v, &b, &art);
+    let (mut p, mut f) = analyze(&b, 128);
+    assert_eq!(s.resolve(&mut p, &mut f).unwrap(), 2);
+    assert!(!f.is_incomplete());
+    assert_eq!(f.analysis_work, 17);
+    let text = f.render_four_modes(p.segment_at(0x1200).unwrap());
+    assert!(text.contains("NewDirectByteBuffer"));
+    assert!(text.contains("GetDirectBufferAddress"));
+    assert!(text.contains("native return allowed"));
+    let mut narrow = b.clone();
+    p32(&mut narrow, 0x200 + 7 * 4, 0xb9439908);
+    let mut nv = v.clone();
+    nv["binary_sha256"] = json!(sha256(&narrow));
+    let ns = parse(&nv, &narrow, &art);
+    let (mut p, mut f) = analyze(&narrow, 128);
+    assert_eq!(ns.resolve(&mut p, &mut f).unwrap(), 0);
+    assert!(f.is_incomplete());
+}
+#[test]
+fn direct_buffer_capture_rejects_bad_size_address_slot_or_execution_result() {
+    let (b, art, v) = buffer_fixture();
+    let edits = [
+        ("/calls/buffer_verified", json!(false)),
+        ("/calls/source_capacity", json!(12)),
+        ("/calls/offset", json!(u64::MAX)),
+        ("/calls/length", json!(129)),
+        ("/x1", json!("0x80000088")),
+        ("/x2", json!("0x20")),
+        ("/calls/source_address", json!("0x0")),
+        ("/slots/0/index", json!(14)),
+        ("/terminal_jni_slot", json!(14)),
+        ("/calls/instrumented", json!(1)),
+    ];
+    for (path, value) in edits {
+        let mut x = v.clone();
+        *x.pointer_mut(path).unwrap() = value;
+        assert!(
+            RuntimeSnapshot::parse(&serde_json::to_vec(&x).unwrap(), &b, &art).is_err(),
+            "{path}"
+        );
+    }
+}
+#[test]
+fn direct_buffer_partial_budgets_do_not_claim_a_tail_was_analyzed() {
+    let (b, art, v) = buffer_fixture();
+    let s = parse(&v, &b, &art);
+    for budget in [1, 8, 9, 16] {
+        let (mut p, mut f) = analyze(&b, budget);
+        s.resolve(&mut p, &mut f).unwrap();
+        assert!(f.is_incomplete());
+        assert!(f.analysis_work <= budget);
+    }
+}
 fn analyze(b: &[u8], budget: usize) -> (GhidraProgram, ghidra_hopper_rs::cfg_tags::Procedure) {
     let image = MachOImage::parse(b).unwrap();
     let mut p = GhidraProgram::from_macho_image("jni", &image);

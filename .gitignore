@@ -5,6 +5,7 @@
 /validation/wide/build/
 /validation/conditional_compare/build/
 /validation/long_movi/build/
+/validation/runtime_branches/build/
 .DS_Store
 *.orig
 *.jar

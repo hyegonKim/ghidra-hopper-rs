@@ -1,5 +1,7 @@
 # ghidra-hopper-rs (v0.3.0)
 
+> **남은 런타임 분기 네 곳 실제 검증 / 2026-10-31:** 기본 ART/CheckJNI 네 프로세스에서 원본 ELF를 실행해 새 캡처 16개를 얻었습니다. ThrowNew, NewDirectByteBuffer 및 entry X0로 등록한 callback의 실제 대상을 해석합니다. PLT resolver는 GOT·x17=0과 원본/계측 SIGSEGV를 확인해 호출 가능한 대상으로 바꾸지 않고 INCOMPLETE를 유지합니다. 캡처 없는 516쌍은 이전과 같고, 같은 새 캡처를 준 48쌍에서 구버전의 미지원 옵션/schema 오류도 숨기지 않았습니다. 외부 본문 디코딩 없이 원래 명령 수·예산을 유지하며 디버그 154개·릴리스 20개 테스트를 통과했습니다. [실제 값·조건부 해석·null fault·비교·재현](validation/runtime_branches/REPORT.md).
+
 > **SMADDL/SMULL·MOVI 구현 / 2026-10-31:** signed W×W 곱과 wrapping X addend, SMULL 별칭, MOVI 8/16/32비트 요소의 LSL/MSL 형식을 구현했습니다. 같은 172개 진입점·세 예산의 516쌍 비교에서 2,048개 예산의 지원 범위 내 종료가 166→168개, 출력 명령 합이 8,645→8,737개로 늘었습니다. nativeRotateYUV는 541→602개, getAvatar는 194→225개로 진행해 지원 범위 내 종료합니다. Hopper 98개 진입점은 유지하며, 실제 ARM64 CPU 111,680건·디버그 146개·릴리스 23개 테스트를 통과했습니다. 이 선택 범위에서 남은 중단은 런타임 간접 분기 네 곳입니다. [동일 조건 비교·네이티브 검증·범위·재현](validation/long_movi/REPORT.md).
 
 > **CCMP·SMULH·SIMD register-offset 구현 / 2026-10-31:** CCMP/CCMN의 입력 NZCV와 fallback, signed SMULH, SIMD B/H/S/D/Q의 레지스터 오프셋 LDR/STR을 실제 의미로 구현했습니다. 직전과 같은 172개 진입점·세 예산의 516쌍에서 2,048개 예산의 지원 범위 내 종료가 162→166개, 출력 명령 합이 8,303→8,645개로 늘었습니다. Hopper 98개 진입점 결과는 유지합니다. 실제 ARM64 CPU와 250,688건 비교, 디버그 140개·릴리스 28개 테스트를 통과했습니다. 이전에 로드로 분류했던 `0x3ca96ac0`은 STR Q이며 저장 결과도 검증했습니다. 다음 SMADDL/SMULL·MOVI와 미해결 런타임 분기는 INCOMPLETE를 유지합니다. [동일 조건 비교·실행 검증·남은 중단점·재현](validation/conditional_compare/REPORT.md).

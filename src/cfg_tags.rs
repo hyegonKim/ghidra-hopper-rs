@@ -300,6 +300,7 @@ impl Procedure {
                                 i.pcode.first(),
                                 Some(
                                     crate::pcode_sleigh::PcodeOp::ExternalTailCall { .. }
+                                        | crate::pcode_sleigh::PcodeOp::RuntimeTailCall { .. }
                                         | crate::pcode_sleigh::PcodeOp::MachOImportTailCall { .. }
                                         | crate::pcode_sleigh::PcodeOp::RuntimeJniCall {
                                             tail: true,
@@ -392,6 +393,22 @@ impl Procedure {
             })
         {
             out.push_str("Runtime JNI scope: supplied offline capture; stable JNIEnv table assumed; external ART body not analyzed\n");
+        }
+        if self
+            .basic_blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .any(|i| {
+                i.pcode.iter().any(|op| {
+                    matches!(
+                        op,
+                        crate::pcode_sleigh::PcodeOp::RuntimeTailCall { .. }
+                            | crate::pcode_sleigh::PcodeOp::RuntimeInvalidBranch { .. }
+                    )
+                })
+            })
+        {
+            out.push_str("Runtime branch scope: supplied controlled replay only; callback interpretation conditional on entry x0; external body not analyzed; observed faults remain INCOMPLETE\n");
         }
         out.push_str(&format!(
             "Instruction work: {} (caller plus bounded callee proofs)\n",
