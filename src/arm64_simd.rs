@@ -52,7 +52,8 @@ pub fn decode(address: u64, word: u32) -> Option<DecodedInstruction> {
             low,
             high,
         }];
-    } else if word & 0x3e000000 == 0x2c000000 && word >> 30 == 2 {
+    } else if word & 0x3e000000 == 0x2c000000 && word >> 30 <= 2 {
+        let size = 4u8 << (word >> 30);
         let mode = (word >> 23) & 3;
         let load = word & (1 << 22) != 0;
         let first = (word & 31) as u8;
@@ -62,15 +63,25 @@ pub fn decode(address: u64, word: u32) -> Option<DecodedInstruction> {
         }
         let rn = ((word >> 5) & 31) as u64;
         let base = Varnode::reg(rn, 8);
-        let displacement =
-            ((((word >> 15) & 127) as i64) - if word & (1 << 21) != 0 { 128 } else { 0 }) * 16;
+        let displacement = ((((word >> 15) & 127) as i64)
+            - if word & (1 << 21) != 0 { 128 } else { 0 })
+            * size as i64;
         i.mnemonic = if load { "ldp" } else { "stp" }.into();
         let memory = match mode {
             1 => format!("[{}], #{displacement}", base.display_arm64()),
             3 => format!("[{}, #{displacement}]!", base.display_arm64()),
             _ => format!("[{}, #{displacement}]", base.display_arm64()),
         };
-        i.raw_args = vec![format!("q{first}"), format!("q{second}"), memory];
+        let prefix = match size {
+            4 => "s",
+            8 => "d",
+            _ => "q",
+        };
+        i.raw_args = vec![
+            format!("{prefix}{first}"),
+            format!("{prefix}{second}"),
+            memory,
+        ];
         i.pcode = vec![
             PcodeOp::IntAdd {
                 dst: temp(0),
@@ -80,17 +91,113 @@ pub fn decode(address: u64, word: u32) -> Option<DecodedInstruction> {
             PcodeOp::IntAdd {
                 dst: temp(1),
                 lhs: temp(0),
-                rhs: Varnode::imm(16, 8),
+                rhs: Varnode::imm(size as u64, 8),
             },
         ];
         for (register, addr) in [(first, temp(0)), (second, temp(1))] {
-            i.pcode.push(if load {
+            i.pcode.push(if size != 16 {
+                if load {
+                    PcodeOp::VectorLoadSized {
+                        register,
+                        addr,
+                        size,
+                    }
+                } else {
+                    PcodeOp::VectorStoreSized {
+                        register,
+                        addr,
+                        size,
+                    }
+                }
+            } else if load {
                 PcodeOp::VectorLoad { register, addr }
             } else {
                 PcodeOp::VectorStore { register, addr }
             });
         }
         if mode != 2 {
+            i.pcode.push(PcodeOp::IntAdd {
+                dst: base,
+                lhs: base,
+                rhs: Varnode::imm(displacement as u64, 8),
+            });
+        }
+    } else if word & 0x3f000000 == 0x3d000000 || word & 0x3f200000 == 0x3c000000 {
+        let unsigned = word & (1 << 24) != 0;
+        let scale = (word >> 30) & 3;
+        let opc = (word >> 22) & 3;
+        if opc >= 2 && scale != 0 {
+            return None;
+        }
+        let size = if opc >= 2 { 16 } else { 1u8 << scale };
+        let register = (word & 31) as u8;
+        let load = opc & 1 != 0;
+        let base = Varnode::reg(((word >> 5) & 31) as u64, 8);
+        let mode = if unsigned { 0 } else { (word >> 10) & 3 };
+        if mode == 2 {
+            return None;
+        }
+        let displacement = if unsigned {
+            (((word >> 10) & 4095) * size as u32) as i64
+        } else {
+            (((word >> 12) & 511) as i64) - if word & (1 << 20) != 0 { 512 } else { 0 }
+        };
+        let prefix = match size {
+            1 => "b",
+            2 => "h",
+            4 => "s",
+            8 => "d",
+            _ => "q",
+        };
+        i.mnemonic = if load {
+            if !unsigned && mode == 0 {
+                "ldur"
+            } else {
+                "ldr"
+            }
+        } else if !unsigned && mode == 0 {
+            "stur"
+        } else {
+            "str"
+        }
+        .into();
+        let memory = match mode {
+            1 => format!("[{}], #{displacement}", base.display_arm64()),
+            3 => format!("[{}, #{displacement}]!", base.display_arm64()),
+            _ => format!("[{}, #{displacement}]", base.display_arm64()),
+        };
+        i.raw_args = vec![format!("{prefix}{register}"), memory];
+        i.pcode = vec![PcodeOp::IntAdd {
+            dst: temp(0),
+            lhs: base,
+            rhs: Varnode::imm(if mode == 1 { 0 } else { displacement as u64 }, 8),
+        }];
+        i.pcode.push(if size == 16 {
+            if load {
+                PcodeOp::VectorLoad {
+                    register,
+                    addr: temp(0),
+                }
+            } else {
+                PcodeOp::VectorStore {
+                    register,
+                    addr: temp(0),
+                }
+            }
+        } else if load {
+            PcodeOp::VectorLoadSized {
+                register,
+                addr: temp(0),
+                size,
+            }
+        } else {
+            PcodeOp::VectorStoreSized {
+                register,
+                addr: temp(0),
+                size,
+            }
+        });
+        if matches!(mode, 1 | 3) {
             i.pcode.push(PcodeOp::IntAdd {
                 dst: base,
                 lhs: base,

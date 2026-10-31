@@ -119,7 +119,7 @@ fn flag_setting_immediate_and_reserved_forms_are_distinct() {
         decode(0x91000400).pcode[0],
         PcodeOp::IntAdd { .. }
     ));
-    for w in [0x0b018000, 0x8bc10000, 0x8b210000, 0xcb010000] {
+    for w in [0x0b018000, 0x8bc10000, 0x8b211400, 0xcbc10000] {
         assert!(
             matches!(decode(w).pcode[0], PcodeOp::Unsupported { .. }),
             "{w:x}"

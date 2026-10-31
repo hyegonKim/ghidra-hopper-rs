@@ -102,6 +102,44 @@ pub enum BitfieldKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PcodeOp {
+    MultiplyAdd {
+        dst: Option<Varnode>,
+        lhs: Varnode,
+        rhs: Varnode,
+        addend: Varnode,
+        width: u8,
+        subtract: bool,
+    },
+    Logical {
+        dst: Option<Varnode>,
+        lhs: Varnode,
+        rhs: Varnode,
+        op: crate::arm64_integer::Logic,
+        invert: bool,
+        shift: crate::arm64_logical::LogicalShift,
+        amount: u8,
+        width: u8,
+        set_flags: bool,
+    },
+    ConditionalTransform {
+        dst: Option<Varnode>,
+        if_true: Varnode,
+        if_false: Varnode,
+        condition: crate::arm64_flags::Condition,
+        action: crate::arm64_integer::SelectAction,
+        width: u8,
+    },
+    RegisterArithmetic {
+        dst: Option<Varnode>,
+        lhs: Varnode,
+        rhs: Varnode,
+        extension: Option<u8>,
+        shift: crate::arm64_flags::Shift,
+        amount: u8,
+        width: u8,
+        subtract: bool,
+        set_flags: bool,
+    },
     VectorImmediate {
         register: u8,
         low: u64,
@@ -114,6 +152,16 @@ pub enum PcodeOp {
     VectorStore {
         register: u8,
         addr: Varnode,
+    },
+    VectorLoadSized {
+        register: u8,
+        addr: Varnode,
+        size: u8,
+    },
+    VectorStoreSized {
+        register: u8,
+        addr: Varnode,
+        size: u8,
     },
     AtomicAdd {
         dst: Varnode,
@@ -230,6 +278,7 @@ pub enum PcodeOp {
         library: String,
         pointer_address: u64,
         selector_address: Option<u64>,
+        selector: Option<String>,
     },
     Bti {
         kind: u8,
@@ -332,7 +381,12 @@ impl PcodeOp {
             | Self::LoadAcquire { dst, .. }
             | Self::ReadThreadPointer { dst, .. } => Some(*dst),
             Self::ExclusiveStoreRelease { status, .. } => Some(*status),
-            Self::ShiftedAdd { dst, .. } | Self::FlagArithmetic { dst, .. } => *dst,
+            Self::ShiftedAdd { dst, .. }
+            | Self::FlagArithmetic { dst, .. }
+            | Self::Logical { dst, .. }
+            | Self::ConditionalTransform { dst, .. }
+            | Self::RegisterArithmetic { dst, .. } => *dst,
+            Self::MultiplyAdd { dst, .. } => *dst,
             _ => None,
         }
     }
@@ -385,6 +439,9 @@ fn decode_arm64_inner(
     objc_stubs: &BTreeMap<u64, String>,
     switch_hints: &SwitchHintTable,
 ) -> DecodedInstruction {
+    if let Some(insn) = crate::arm64_integer::decode(addr, word) {
+        return insn;
+    }
     if let Some(insn) = crate::arm64_simd::decode(addr, word) {
         return insn;
     }
@@ -755,9 +812,26 @@ pub fn decompile_instructions_to_pseudocode_with_aliases(
                 }
             }
             match op {
+                PcodeOp::MultiplyAdd {dst,lhs,rhs,addend,width,subtract} => out.push_str(&format!("    {}multiply_add_u{width}({}, {}, {}, subtract={subtract}); // wrapping integer arithmetic; NZCV preserved\n",dst.map(|v|format!("{} = ",v.display_arm64_with_aliases(reg_aliases))).unwrap_or_default(),lhs.display_arm64_with_aliases(reg_aliases),rhs.display_arm64_with_aliases(reg_aliases),addend.display_arm64_with_aliases(reg_aliases))),
+                PcodeOp::Logical { dst, lhs, rhs, op, invert, shift, amount, width, set_flags } => {
+                    let result = format!("logical_{op:?}_u{width}({}, {}, invert={invert}, shift={shift:?}, amount={amount})", lhs.display_arm64_with_aliases(reg_aliases), rhs.display_arm64_with_aliases(reg_aliases));
+                    out.push_str(&format!("    logical_result = {result};\n"));
+                    if let Some(dst)=dst { out.push_str(&format!("    {} = logical_result;\n",dst.display_arm64_with_aliases(reg_aliases))); }
+                    if *set_flags { out.push_str(&format!("    nzcv = logical_nzcv_u{width}(logical_result); // N/Z from result, C=0, V=0\n")); }
+                },
+                PcodeOp::ConditionalTransform { dst, if_true, if_false, condition, action, width } => {
+                    out.push_str(&format!("    {}select_transform_u{width}({}, {}, {}, false_action={action:?}); // NZCV preserved\n",dst.map(|v|format!("{} = ",v.display_arm64_with_aliases(reg_aliases))).unwrap_or_default(),condition.expression(),if_true.display_arm64_with_aliases(reg_aliases),if_false.display_arm64_with_aliases(reg_aliases)));
+                },
+                PcodeOp::RegisterArithmetic { dst, lhs, rhs, extension, shift, amount, width, subtract, set_flags } => {
+                    out.push_str(&format!("    (integer_result, integer_flags) = register_arithmetic_u{width}({}, {}, extension={extension:?}, shift={shift:?}, amount={amount}, subtract={subtract});\n",lhs.display_arm64_with_aliases(reg_aliases),rhs.display_arm64_with_aliases(reg_aliases)));
+                    if let Some(dst)=dst {out.push_str(&format!("    {} = integer_result;\n",dst.display_arm64_with_aliases(reg_aliases)));}
+                    if *set_flags {out.push_str("    nzcv = integer_flags;\n");}
+                },
                 PcodeOp::VectorImmediate{register,low,high} => out.push_str(&format!("    v{register} = u128_from_halves(0x{low:016x}, 0x{high:016x}); // separate SIMD bank; NZCV preserved\n")),
                 PcodeOp::VectorLoad{register,addr} => out.push_str(&format!("    v{register} = load_u128({});\n",addr.display_arm64_with_aliases(reg_aliases))),
                 PcodeOp::VectorStore{register,addr} => out.push_str(&format!("    store_u128({}, v{register});\n",addr.display_arm64_with_aliases(reg_aliases))),
+                PcodeOp::VectorLoadSized{register,addr,size} => out.push_str(&format!("    v{register} = zero_extend_to_u128(load_u{}({})); // raw bits; clears upper SIMD bits\n",size*8,addr.display_arm64_with_aliases(reg_aliases))),
+                PcodeOp::VectorStoreSized{register,addr,size} => out.push_str(&format!("    store_u{}({}, low_bits(v{register}, {}));\n",size*8,addr.display_arm64_with_aliases(reg_aliases),size*8)),
                 PcodeOp::AtomicAdd{dst,src,addr,acquire,release} => out.push_str(&format!("    {} = atomic_fetch_add_u{}({}, {}, acquire={}, release={}); // inputs read before output; NZCV preserved\n",dst.display_arm64_with_aliases(reg_aliases),dst.size*8,addr.display_arm64_with_aliases(reg_aliases),src.display_arm64_with_aliases(reg_aliases),acquire,release)),
                 PcodeOp::ExclusiveLoadAcquire{dst,addr} => out.push_str(&format!("    {} = exclusive_load_acquire_u{}({}, &exclusive_monitor); // establishes reservation; NZCV preserved\n",dst.display_arm64_with_aliases(reg_aliases),dst.size*8,addr.display_arm64_with_aliases(reg_aliases))),
                 PcodeOp::ExclusiveStoreRelease{status,src,addr} => out.push_str(&format!("    {} = exclusive_store_release_u{}({}, {}, &exclusive_monitor); // 0=stored, 1=failed; consumes reservation; spurious failure allowed\n",status.display_arm64_with_aliases(reg_aliases),src.size*8,addr.display_arm64_with_aliases(reg_aliases),src.display_arm64_with_aliases(reg_aliases))),
@@ -802,8 +876,11 @@ pub fn decompile_instructions_to_pseudocode_with_aliases(
                     out.push_str(&format!("    {} = arm64_{:?}_bitfield_u{}({}, {}, {}, {});\n",dst.display_arm64_with_aliases(reg_aliases),kind,dst.size*8,src.display_arm64_with_aliases(reg_aliases),old_dst.display_arm64_with_aliases(reg_aliases),immr,imms));
                 }
                 PcodeOp::ExternalTailCall{symbol,got_address} => out.push_str(&format!("    tailcall_external({symbol:?}, got=0x{got_address:x}); // JUMP_SLOT symbol resolved; runtime address and signature unknown\n")),
-                PcodeOp::MachOImportTailCall{symbol,library,pointer_address,selector_address} => {
-                    if let Some(selref)=selector_address {out.push_str(&format!("    // selector loaded from selref 0x{selref:x}; name and runtime value unresolved\n"));}
+                PcodeOp::MachOImportTailCall{symbol,library,pointer_address,selector_address,selector} => {
+                    if let Some(selref)=selector_address {
+                        if let Some(name)=selector {out.push_str(&format!("    // verified selector {name:?} from selref 0x{selref:x}; runtime SEL value unknown\n"));}
+                        else {out.push_str(&format!("    // selector loaded from selref 0x{selref:x}; name and runtime value unresolved\n"));}
+                    }
                     out.push_str(&format!("    tailcall_import({symbol:?}, dylib={library:?}, slot=0x{pointer_address:x}); // Mach-O indirect symbol binding; runtime address and signature unknown\n"));
                 },
                 PcodeOp::Bti { kind } => out.push_str(&format!(

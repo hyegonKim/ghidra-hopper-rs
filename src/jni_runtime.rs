@@ -450,7 +450,9 @@ fn transfer(
             _ => None,
         };
         match op {
-            PcodeOp::Store { addr, .. } | PcodeOp::VectorStore { addr, .. } => {
+            PcodeOp::Store { addr, .. }
+            | PcodeOp::VectorStore { addr, .. }
+            | PcodeOp::VectorStoreSized { addr, .. } => {
                 if !matches!(get(*addr, &s, &t), Some(Abstract::Stack(_))) {
                     s.valid = false;
                 }

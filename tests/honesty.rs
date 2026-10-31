@@ -12,7 +12,7 @@ fn unsupported_instruction_is_visible_and_stops_cfg() {
         "__TEXT",
         0x1000,
         0,
-        [0xca0303e2u32, 0xd65f03c0]
+        [0x9ac30842u32, 0xd65f03c0]
             .iter()
             .flat_map(|w| w.to_le_bytes())
             .collect(),
@@ -89,7 +89,7 @@ fn unknown_instruction_cannot_preserve_a_stale_string_argument() {
     let mut data = vec![0; 128];
     data[64..68].copy_from_slice(b"old\0");
     let seg = Segment::new("__TEXT", 0x1000, 0, data);
-    let words = [0x90000002, 0x91010042, 0xca0303e2, 0x94000004];
+    let words = [0x90000002, 0x91010042, 0x9ac30842, 0x94000004];
     let stubs = BTreeMap::from([(0x101c, "go:".into())]);
     let insns: Vec<_> = words
         .iter()

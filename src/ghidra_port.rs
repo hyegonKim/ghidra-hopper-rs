@@ -140,6 +140,7 @@ impl Default for ObjcDataTypes {
 /// Unified Rust representation of Ghidra's `ProgramDB` + Hopper's `Document`.
 #[derive(Debug, Clone)]
 pub struct GhidraProgram {
+    pub selector_stub_proofs: BTreeMap<u64, crate::macho_objc::SelectorStubProof>,
     pub macho_imports: BTreeMap<u64, crate::macho_objc::MachOImportBinding>,
     pub plt_bindings: BTreeMap<u64, crate::macho_objc::PltBinding>,
     pub name: String,
@@ -158,6 +159,7 @@ impl GhidraProgram {
     pub fn new(name: impl Into<String>, text_seg: Segment) -> Self {
         Self {
             macho_imports: BTreeMap::new(),
+            selector_stub_proofs: BTreeMap::new(),
             plt_bindings: BTreeMap::new(),
             name: name.into(),
             segments: vec![text_seg],
@@ -174,6 +176,7 @@ impl GhidraProgram {
 
     pub fn from_macho_image(name: impl Into<String>, img: &MachOImage) -> Self {
         let mut prog = Self {
+            selector_stub_proofs: img.objc.selector_stub_proofs.clone(),
             macho_imports: img.objc.macho_imports.clone(),
             plt_bindings: img.objc.plt_bindings.clone(),
             name: name.into(),
@@ -274,7 +277,19 @@ impl HopperHybridObjcAnalyzerRs {
         }
 
         // 2. Decode & Lift ARM64 instructions + build Hopper ByteType states & BasicBlock CFG
-        let stubs = prog.objc_stub_selectors.clone();
+        let mut stubs = prog.objc_stub_selectors.clone();
+        let selector_context =
+            if prog.selector_stub_proofs.is_empty() && prog.macho_imports.is_empty() {
+                String::new()
+            } else {
+                crate::macho_objc::selector_context(&prog.segments)
+            };
+        stubs.retain(|&pc, name| {
+            prog.selector_stub_proofs.get(&pc).is_none_or(|proof| {
+                proof.selector == *name
+                    && proof.matches_with_context(pc, &prog.segments, &selector_context)
+            })
+        });
         let hints = prog.switch_hints.clone();
         let mut nonreturning = BTreeMap::new();
         for binding in prog
@@ -291,7 +306,8 @@ impl HopperHybridObjcAnalyzerRs {
             }
         }
         for binding in prog.macho_imports.values().filter(|b| {
-            matches!(b.symbol.as_str(), "___stack_chk_fail" | "_exit")
+            b.context_sha256 == selector_context
+                && matches!(b.symbol.as_str(), "___stack_chk_fail" | "_exit")
                 && b.library == "/usr/lib/libSystem.B.dylib"
         }) {
             if binding.instructions.iter().enumerate().all(|(n, word)| {
@@ -419,9 +435,10 @@ impl HopperHybridObjcAnalyzerRs {
                 if let Some(binding) = prog.macho_imports.get(&insn.address).cloned() {
                     // Entering at LDR/BR, an explicit switch override, or changed
                     // code cannot inherit an import proven for the full stub.
-                    let full_stub = binding.instructions.iter().enumerate().all(|(n, word)| {
-                        decoded_words.get(&(binding.stub_address + n as u64 * 4)) == Some(word)
-                    });
+                    let full_stub = binding.context_sha256 == selector_context
+                        && binding.instructions.iter().enumerate().all(|(n, word)| {
+                            decoded_words.get(&(binding.stub_address + n as u64 * 4)) == Some(word)
+                        });
                     if full_stub
                         && matches!(insn.pcode.first(), Some(crate::pcode_sleigh::PcodeOp::BranchInd { target_reg, switch_targets }) if target_reg.offset == 16 && switch_targets.is_empty())
                     {
@@ -430,6 +447,7 @@ impl HopperHybridObjcAnalyzerRs {
                             library: binding.library.clone(),
                             pointer_address: binding.pointer_address,
                             selector_address: binding.selector_address,
+                            selector: stubs.get(&binding.stub_address).cloned(),
                         }];
                         prog.add_memory_reference(
                             insn.address,

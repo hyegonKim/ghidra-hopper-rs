@@ -83,7 +83,7 @@ fn vector_pair_offsets_modes_and_banks_do_not_confuse_q31_with_sp() {
         decode(0xad000000).pcode[0],
         PcodeOp::Unsupported { .. }
     )); // duplicate store is defined
-    for w in [0xac000400, 0x6d000400, 0x2d000400] {
+    for w in [0xac000400, 0x6c000400, 0x2c000400] {
         assert!(matches!(decode(w).pcode[0], PcodeOp::Unsupported { .. }));
     }
 }

@@ -2,6 +2,158 @@ use ghidra_hopper_rs::{
     ghidra_port::GhidraProgram, ghidra_port::HopperHybridObjcAnalyzerRs, macho_objc::MachOImage,
     pcode_sleigh::PcodeOp,
 };
+
+#[test]
+fn chained_got_symbol_ordinal_weakness_and_addend_must_agree_with_indirect_metadata() {
+    for mode in 0..5 {
+        let mut b = chained_fixture();
+        match mode {
+            0 => b[0x95c] = b'X',
+            1 => p32(&mut b, 0x958, 2),
+            2 => p32(&mut b, 0x958, 0x101),
+            3 => p64(&mut b, 0x600, (1 << 63) | (1 << 24)),
+            _ => p32(&mut b, 0x918, 1), // Compressed symbol pool is unsupported.
+        }
+        let image = MachOImage::parse(&b).unwrap();
+        assert!(image.objc.macho_imports.is_empty(), "{mode}");
+        assert!(image.objc.selector_stubs.is_empty(), "{mode}");
+    }
+    let mut b = chained_fixture();
+    p64(&mut b, 0x600, (1 << 63) | 1); // ordinal outside the declared chained imports.
+    assert!(MachOImage::parse(&b).is_err());
+}
+
+#[test]
+fn upstream_chain_edit_invalidates_selector_even_when_its_own_pointer_is_unchanged() {
+    let mut b = chained_fixture();
+    b[0x93e..0x940].copy_from_slice(&0x3f8u16.to_le_bytes());
+    p64(&mut b, 0x3f8, (2 << 51) | 0x480);
+    let image = MachOImage::parse(&b).unwrap();
+    assert_eq!(
+        image.objc.selector_stubs.get(&0x1300).map(String::as_str),
+        Some("echo:")
+    );
+    let mut p = GhidraProgram::from_macho_image("upstream", &image);
+    p.segments[0].data[0x3fe] = 0; // Previous chain link no longer reaches the selref.
+    let f = HopperHybridObjcAnalyzerRs::new().analyze_function_zero_ipc(
+        &mut p,
+        "upstream",
+        0x12c0,
+        16,
+        &[],
+    );
+    assert!(matches!(
+        f.basic_blocks[0].instructions[0].pcode[0],
+        PcodeOp::Call { .. }
+    ));
+    b[0x3fe] = 0;
+    assert!(MachOImage::parse(&b)
+        .unwrap()
+        .objc
+        .selector_stubs
+        .is_empty());
+}
+
+fn chained_fixture() -> Vec<u8> {
+    let mut b = fixture();
+    b.copy_within(264..576, 344);
+    p32(&mut b, 16, 6);
+    p32(&mut b, 20, 640);
+    p32(&mut b, 32 + 4, 312);
+    p32(&mut b, 32 + 64, 3);
+    b[264..344].fill(0);
+    section(&mut b, 264, b"__objc_methname", (0x1480, 0x480, 6), 2, 0);
+    b[0x480..0x486].copy_from_slice(b"echo:\0");
+    p64(&mut b, 0x400, 0x480);
+    p32(&mut b, 656, 0x80000034);
+    p32(&mut b, 660, 16);
+    p32(&mut b, 664, 0x900);
+    p32(&mut b, 668, 128);
+    p32(&mut b, 0x904, 28);
+    p32(&mut b, 0x908, 88);
+    p32(&mut b, 0x90c, 92);
+    p32(&mut b, 0x910, 1);
+    p32(&mut b, 0x914, 1);
+    p32(&mut b, 0x91c, 2);
+    p32(&mut b, 0x920, 12);
+    p32(&mut b, 0x924, 36);
+    p32(&mut b, 0x928, 24);
+    b[0x92c..0x92e].copy_from_slice(&4096u16.to_le_bytes());
+    b[0x92e..0x930].copy_from_slice(&6u16.to_le_bytes());
+    b[0x93c..0x93e].copy_from_slice(&1u16.to_le_bytes());
+    b[0x93e..0x940].copy_from_slice(&0x400u16.to_le_bytes());
+    p32(&mut b, 0x940, 24);
+    b[0x944..0x946].copy_from_slice(&4096u16.to_le_bytes());
+    b[0x946..0x948].copy_from_slice(&6u16.to_le_bytes());
+    p64(&mut b, 0x948, 0x1000);
+    b[0x954..0x956].copy_from_slice(&1u16.to_le_bytes());
+    p32(&mut b, 0x958, 1);
+    let symbol = b"_objc_msgSend\0";
+    b[0x95c..0x95c + symbol.len()].copy_from_slice(symbol);
+    p64(&mut b, 0x600, 1 << 63);
+    p32(&mut b, 0x2c0, 0x94000010);
+    p32(&mut b, 0x2c4, 0xd65f03c0);
+    b
+}
+#[test]
+fn chained_selector_is_named_only_with_full_msgsend_import_proof() {
+    let image = MachOImage::parse(&chained_fixture()).unwrap();
+    assert_eq!(
+        image
+            .objc
+            .selector_references
+            .get(&0x1400)
+            .map(String::as_str),
+        Some("echo:")
+    );
+    assert_eq!(
+        image.objc.selector_stubs.get(&0x1300).map(String::as_str),
+        Some("echo:")
+    );
+    let proof = &image.objc.selector_stub_proofs[&0x1300];
+    assert!(proof.matches(0x1300, &image.segments));
+    let mut p = GhidraProgram::from_macho_image("chain", &image);
+    let mut analyzer = HopperHybridObjcAnalyzerRs::new();
+    let f = analyzer.analyze_function_zero_ipc(&mut p, "chain", 0x12c0, 16, &[]);
+    assert!(!f.is_incomplete());
+    assert!(
+        matches!(&f.basic_blocks[0].instructions[0].pcode[0],PcodeOp::CallObjC{selector,..} if selector=="echo:")
+    );
+    assert_eq!(analyzer.discovered_messages[0].receiver, "x0");
+    assert!(p.external_methods.is_empty());
+}
+#[test]
+fn absent_membership_bind_slots_unknown_formats_and_fake_tails_do_not_get_names() {
+    for mode in 0..4 {
+        let mut b = chained_fixture();
+        match mode {
+            0 => b[0x93e..0x940].copy_from_slice(&65535u16.to_le_bytes()),
+            1 => p64(&mut b, 0x400, 1 << 63),
+            2 => {
+                b[0x92e..0x930].copy_from_slice(&12u16.to_le_bytes());
+                p64(&mut b, 0x400, 0x1480);
+            }
+            _ => p32(&mut b, 0x310, 0xd65f03c0),
+        }
+        let image = MachOImage::parse(&b).unwrap();
+        assert!(image.objc.selector_stubs.is_empty(), "{mode}");
+    }
+}
+#[test]
+fn changed_selector_reference_name_or_stub_cannot_reuse_loaded_objc_call_proof() {
+    let image = MachOImage::parse(&chained_fixture()).unwrap();
+    for (at, byte) in [(0x400, 0x81), (0x480, b'X'), (0x300, 0), (0x310, 0xff)] {
+        let mut p = GhidraProgram::from_macho_image("changed", &image);
+        p.segments[0].data[at] = byte;
+        let mut analyzer = HopperHybridObjcAnalyzerRs::new();
+        let f = analyzer.analyze_function_zero_ipc(&mut p, "changed", 0x12c0, 16, &[]);
+        assert!(matches!(
+            f.basic_blocks[0].instructions[0].pcode[0],
+            PcodeOp::Call { .. }
+        ));
+        assert!(analyzer.discovered_messages.is_empty(), "{at:x}");
+    }
+}
 fn p32(b: &mut [u8], o: usize, v: u32) {
     b[o..o + 4].copy_from_slice(&v.to_le_bytes());
 }

@@ -131,10 +131,7 @@ fn zero_register_sp_and_mov_alias_are_not_confused() {
 
 #[test]
 fn reserved_encodings_and_adjacent_instructions_still_stop() {
-    for word in [
-        0x2a018000, 0x32400000, 0xb240fc00, 0x3200fc00, 0xaa370308, 0x8a170308, 0xca170308,
-        0xea170308,
-    ] {
+    for word in [0x2a018000, 0x32400000, 0xb240fc00, 0x3200fc00] {
         assert!(
             matches!(decode(word).pcode[0], PcodeOp::Unsupported { .. }),
             "{word:x}"

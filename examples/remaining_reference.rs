@@ -76,6 +76,121 @@ impl Machine {
     }
     fn execute(&mut self, op: &PcodeOp, next: &mut u64, halt: &mut bool) {
         match op {
+            PcodeOp::Logical {
+                dst,
+                lhs,
+                rhs,
+                op,
+                invert,
+                shift,
+                amount,
+                width,
+                set_flags,
+            } => {
+                let value = ghidra_hopper_rs::arm64_integer::logical(
+                    self.read(*lhs),
+                    self.read(*rhs),
+                    *width,
+                    *op,
+                    *invert,
+                    *shift,
+                    *amount,
+                )
+                .unwrap();
+                if let Some(dst) = dst {
+                    self.write(*dst, value);
+                }
+                if *set_flags {
+                    self.flags = ghidra_hopper_rs::arm64_integer::logical_flags(value, *width)
+                        .unwrap()
+                        .bits();
+                }
+            }
+            PcodeOp::ConditionalTransform {
+                dst,
+                if_true,
+                if_false,
+                condition,
+                action,
+                width,
+            } => {
+                let value = ghidra_hopper_rs::arm64_integer::selected(
+                    self.read(*if_true),
+                    self.read(*if_false),
+                    *width,
+                    *condition,
+                    ghidra_hopper_rs::arm64_flags::Nzcv::from_bits(self.flags),
+                    *action,
+                )
+                .unwrap();
+                if let Some(dst) = dst {
+                    self.write(*dst, value);
+                }
+            }
+            PcodeOp::RegisterArithmetic {
+                dst,
+                lhs,
+                rhs,
+                extension,
+                shift,
+                amount,
+                width,
+                subtract,
+                set_flags,
+            } => {
+                let (value, flags) = ghidra_hopper_rs::arm64_integer::register_arithmetic(
+                    self.read(*lhs),
+                    self.read(*rhs),
+                    *width,
+                    *extension,
+                    *shift,
+                    *amount,
+                    *subtract,
+                    *set_flags,
+                )
+                .unwrap();
+                if let Some(dst) = dst {
+                    self.write(*dst, value);
+                }
+                if let Some(flags) = flags {
+                    self.flags = flags.bits();
+                }
+            }
+            PcodeOp::MultiplyAdd {
+                dst,
+                lhs,
+                rhs,
+                addend,
+                width,
+                subtract,
+            } => {
+                let value = ghidra_hopper_rs::arm64_integer::multiply_add(
+                    self.read(*lhs),
+                    self.read(*rhs),
+                    self.read(*addend),
+                    *width,
+                    *subtract,
+                )
+                .unwrap();
+                if let Some(dst) = dst {
+                    self.write(*dst, value);
+                }
+            }
+            PcodeOp::VectorLoadSized {
+                register,
+                addr,
+                size,
+            } => {
+                let value = self.load(self.read(*addr), *size);
+                self.vectors[*register as usize] = value;
+            }
+            PcodeOp::VectorStoreSized {
+                register,
+                addr,
+                size,
+            } => {
+                self.store(self.read(*addr), *size, self.vectors[*register as usize]);
+            }
             PcodeOp::Copy { dst, src } => self.write(*dst, self.read(*src)),
             PcodeOp::IntAdd { dst, lhs, rhs } => {
                 self.write(*dst, self.read(*lhs).wrapping_add(self.read(*rhs)))

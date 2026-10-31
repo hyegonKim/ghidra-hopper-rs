@@ -27,6 +27,7 @@ fn cstring(bytes: &[u8], offset: usize) -> Option<String> {
 pub(super) fn resolve(
     slice: &[u8],
     segments: &[Segment],
+    context: &str,
 ) -> Result<BTreeMap<u64, MachOImportBinding>, String> {
     let mut bindings = BTreeMap::new();
     // Only the two-level namespace's explicit dependency ordinals are resolved.
@@ -302,6 +303,8 @@ pub(super) fn resolve(
             bindings.insert(
                 branch,
                 MachOImportBinding {
+                    library_ordinal: ordinal as u16,
+                    context_sha256: context.to_string(),
                     stub_address: pc,
                     pointer_address: pointer,
                     symbol,

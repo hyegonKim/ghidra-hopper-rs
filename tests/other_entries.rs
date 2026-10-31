@@ -134,7 +134,7 @@ fn csel_matches_conditions_all_flags_widths_and_zero_inputs() {
             }
         }
     }
-    for w in [0x9a810400, 0xda810000, 0x9a810800] {
+    for w in [0xba810400, 0xfa810000, 0x9a810800] {
         assert!(matches!(decode(w).pcode[0], PcodeOp::Unsupported { .. }));
     }
 }

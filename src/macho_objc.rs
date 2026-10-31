@@ -8,7 +8,9 @@
 //! - Swift 5 `__swift5_typeref` and `__swift5_reflstr` reflection strings
 
 use crate::segment::{Section, Segment};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+mod chained;
 mod imports;
 
 pub const FAT_MAGIC: u32 = 0xcafebabe;
@@ -28,6 +30,7 @@ pub struct ArchSlice {
 
 #[derive(Debug, Clone)]
 pub struct ObjCMetadata {
+    pub selector_stub_proofs: BTreeMap<u64, SelectorStubProof>,
     pub macho_imports: BTreeMap<u64, MachOImportBinding>,
     pub plt_bindings: BTreeMap<u64, PltBinding>,
     pub class_names: Vec<String>,
@@ -41,6 +44,51 @@ pub struct ObjCMetadata {
 }
 
 #[derive(Debug, Clone)]
+pub struct SelectorStubProof {
+    pub context_sha256: String,
+    pub instructions: Vec<u32>,
+    pub selref: u64,
+    pub encoded: u64,
+    pub target: u64,
+    pub selector: String,
+}
+impl SelectorStubProof {
+    pub fn matches(&self, start: u64, segments: &[Segment]) -> bool {
+        self.matches_with_context(start, segments, &selector_context(segments))
+    }
+    pub(crate) fn matches_with_context(
+        &self,
+        start: u64,
+        segments: &[Segment],
+        context: &str,
+    ) -> bool {
+        let read = |address, size| segments.iter().find_map(|s| s.read_bytes(address, size));
+        self.context_sha256 == context
+            && self
+                .instructions
+                .iter()
+                .enumerate()
+                .all(|(n, w)| read(start + n as u64 * 4, 4) == Some(w.to_le_bytes().as_slice()))
+            && read(self.selref, 8) == Some(self.encoded.to_le_bytes().as_slice())
+            && read(self.target, self.selector.len() + 1).is_some_and(|b| {
+                b.last() == Some(&0) && &b[..b.len() - 1] == self.selector.as_bytes()
+            })
+    }
+}
+
+pub(crate) fn selector_context(segments: &[Segment]) -> String {
+    let mut hash = Sha256::new();
+    for s in segments {
+        hash.update(s.start_address.to_le_bytes());
+        hash.update(s.file_offset.to_le_bytes());
+        hash.update([s.permissions.unwrap_or(255)]);
+        hash.update((s.data.len() as u64).to_le_bytes());
+        hash.update(&s.data);
+    }
+    format!("{:x}", hash.finalize())
+}
+
+#[derive(Debug, Clone)]
 pub struct PltBinding {
     pub instructions: [u32; 4],
     pub stub_address: u64,
@@ -51,6 +99,8 @@ pub struct PltBinding {
 
 #[derive(Debug, Clone)]
 pub struct MachOImportBinding {
+    pub library_ordinal: u16,
+    pub context_sha256: String,
     pub stub_address: u64,
     pub pointer_address: u64,
     pub symbol: String,
@@ -275,8 +325,10 @@ impl MachOImage {
         let mut entry_point = None;
         let mut text_vmaddr = 0u64;
         let mut function_start_data = None;
+        let mut chained_data = None;
 
         let mut objc = ObjCMetadata {
+            selector_stub_proofs: BTreeMap::new(),
             macho_imports: BTreeMap::new(),
             plt_bindings: BTreeMap::new(),
             class_names: Vec::new(),
@@ -363,6 +415,13 @@ impl MachOImage {
             } else if cmd == LC_MAIN && cmdsize >= 24 {
                 let entryoff = read_u64_le(slice, cmd_offset + 8).unwrap_or(0);
                 entry_point = Some(entryoff);
+            } else if cmd == 0x80000034 {
+                if cmdsize < 16 || chained_data.is_some() {
+                    return Err("Invalid LC_DYLD_CHAINED_FIXUPS".into());
+                }
+                let off = read_u32_le(slice, cmd_offset + 8).unwrap() as usize;
+                let size = read_u32_le(slice, cmd_offset + 12).unwrap() as usize;
+                chained_data = Some(checked_range(off, size, slice.len())?);
             } else if cmd == 0x26 {
                 if cmdsize < 16 || function_start_data.is_some() {
                     return Err("Invalid LC_FUNCTION_STARTS command".into());
@@ -407,6 +466,11 @@ impl MachOImage {
             }
         }
 
+        let rebases = chained_data
+            .as_ref()
+            .map(|range| chained::decode(&slice[range.clone()], &segments, text_vmaddr))
+            .transpose()?;
+        let mut selector_targets = BTreeMap::new();
         // Resolve selectors through their actual VM pointers. String table order is unrelated
         // to selref/stub order; unresolved dyld chained pointers must not become invented names.
         let resolve_selector = |pointer: u64| -> Option<String> {
@@ -423,10 +487,22 @@ impl MachOImage {
                 if delta >= *size {
                     continue;
                 }
+                if !segments.iter().any(|s| {
+                    s.permissions.is_some_and(|p| p & 1 != 0)
+                        && s.file_offset_for_address(pointer) == Some((*offset + delta) as u64)
+                }) {
+                    continue;
+                }
                 let tail = slice.get(offset.checked_add(delta)?..offset.checked_add(*size)?)?;
                 let end = tail.iter().position(|&b| b == 0)?;
                 if end == 0 {
                     return None;
+                }
+                if !segments
+                    .iter()
+                    .any(|s| s.read_bytes(pointer, end + 1) == Some(&tail[..end + 1]))
+                {
+                    continue;
                 }
                 return std::str::from_utf8(&tail[..end]).ok().map(str::to_owned);
             }
@@ -439,32 +515,26 @@ impl MachOImage {
             let bytes_sec = &slice[*offset..offset + size];
             for (idx, ptr) in bytes_sec.chunks_exact(8).enumerate() {
                 let pointer = u64::from_le_bytes(ptr.try_into().unwrap());
-                if let Some(sel) = resolve_selector(pointer) {
-                    objc.selector_references
-                        .insert(addr + (idx * 8) as u64, sel);
-                }
-            }
-        }
-        // ARM64 objc stubs load x1 from a selref using ADRP + LDR. Decode that
-        // reference rather than assigning the nth method string to the nth stub.
-        for (sectname, addr, offset, size) in &sec_ranges {
-            if sectname != "__objc_stubs" || selected_arch != "arm64" {
-                continue;
-            }
-            for (idx, stub) in slice[*offset..offset + size].chunks_exact(32).enumerate() {
-                let adrp = read_u32_le(stub, 0).unwrap();
-                let ldr = read_u32_le(stub, 4).unwrap();
-                if adrp & 0x9f00001f != 0x90000001 || ldr & 0xffc003ff != 0xf9400021 {
+                let slot = addr + (idx * 8) as u64;
+                if !segments.iter().any(|s| {
+                    s.file_offset_for_address(slot) == Some((*offset + idx * 8) as u64)
+                        && s.permissions.is_some_and(|p| p & 1 != 0)
+                        && s.read_bytes(slot, 8) == Some(ptr)
+                }) {
                     continue;
                 }
-                let pc = addr + (idx * 32) as u64;
-                let imm = (((adrp >> 5) & 0x7ffff) << 2) | ((adrp >> 29) & 3);
-                let pages = ((imm as i64) << 43) >> 43;
-                let selref = (pc & !0xfff)
-                    .wrapping_add((pages << 12) as u64)
-                    .wrapping_add((((ldr >> 10) & 0xfff) * 8) as u64);
-                if let Some(sel) = objc.selector_references.get(&selref).cloned() {
-                    objc.selector_stubs.insert(pc, sel);
+                let pointer = if let Some(rebases) = &rebases {
+                    let Some(pointer) = rebases.rebases.get(&slot) else {
+                        continue;
+                    };
+                    *pointer
+                } else {
+                    pointer
+                };
+                if let Some(sel) = resolve_selector(pointer) {
+                    selector_targets.insert(slot, pointer);
+                    objc.selector_references
+                        .insert(addr + (idx * 8) as u64, sel);
                 }
             }
         }
@@ -473,8 +543,43 @@ impl MachOImage {
             if let Some(range) = function_start_data {
                 record_function_starts(&slice[range], text_vmaddr, &mut segments)?;
             }
-            objc.macho_imports = imports::resolve(slice, &segments)?;
+            let context = selector_context(&segments);
+            objc.macho_imports = imports::resolve(slice, &segments, &context)?;
+            if let Some(chains) = &rebases {
+                objc.macho_imports.retain(|_, b| {
+                    chains
+                        .binds
+                        .get(&b.pointer_address)
+                        .is_some_and(|(name, ordinal)| {
+                            *name == b.symbol && *ordinal == b.library_ordinal
+                        })
+                });
+            }
             for binding in objc.macho_imports.values() {
+                if let Some(selref) = binding.selector_address {
+                    if let (Some(selector), Some(&target)) = (
+                        objc.selector_references.get(&selref),
+                        selector_targets.get(&selref),
+                    ) {
+                        if let Some(encoded) = segments.iter().find_map(|s| s.read_u64_le(selref)) {
+                            let proof = SelectorStubProof {
+                                context_sha256: context.clone(),
+                                instructions: binding.instructions.clone(),
+                                selref,
+                                encoded,
+                                target,
+                                selector: selector.clone(),
+                            };
+                            if proof.matches_with_context(binding.stub_address, &segments, &context)
+                            {
+                                objc.selector_stubs
+                                    .insert(binding.stub_address, selector.clone());
+                                objc.selector_stub_proofs
+                                    .insert(binding.stub_address, proof);
+                            }
+                        }
+                    }
+                }
                 objc.symbols
                     .insert(binding.stub_address, format!("import${}", binding.symbol));
             }
@@ -576,6 +681,7 @@ impl MachOImage {
 
         let mut objc = ObjCMetadata {
             macho_imports: BTreeMap::new(),
+            selector_stub_proofs: BTreeMap::new(),
             plt_bindings: BTreeMap::new(),
             class_names: Vec::new(),
             method_names: Vec::new(),

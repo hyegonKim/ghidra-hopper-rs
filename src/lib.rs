@@ -4,6 +4,7 @@ pub mod arm64_bitfield;
 pub mod arm64_data;
 pub mod arm64_flags;
 pub mod arm64_indexed;
+pub mod arm64_integer;
 mod arm64_jump_table;
 pub mod arm64_logical;
 mod arm64_memory;

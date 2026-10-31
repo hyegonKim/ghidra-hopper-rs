@@ -25,6 +25,8 @@ fn macho() -> Vec<u8> {
     put64(&mut b, 56, 0x1000);
     put64(&mut b, 64, 512);
     put64(&mut b, 80, 512);
+    put32(&mut b, 88, 5);
+    put32(&mut b, 92, 5);
     put32(&mut b, 96, 2);
     b[104..119].copy_from_slice(b"__objc_methname");
     put64(&mut b, 136, 0x1140);
@@ -122,7 +124,7 @@ fn segment_rejects_overflowing_lengths() {
 }
 
 #[test]
-fn objc_stubs_decode_selref_load_instead_of_method_index() {
+fn objc_prefix_alone_does_not_prove_an_objc_call() {
     let mut b = macho();
     // Add a third section at 264, before the actual section data.
     put32(&mut b, 20, 312);
@@ -132,17 +134,26 @@ fn objc_stubs_decode_selref_load_instead_of_method_index() {
     b.copy_within(320..352, 400);
     put32(&mut b, 152, 400);
     put32(&mut b, 232, 416);
+    put64(&mut b, 136, 0x1190);
+    put64(&mut b, 216, 0x11a0);
+    put64(&mut b, 416, 0x1192);
+    put64(&mut b, 424, 0x1190);
     b[264..276].copy_from_slice(b"__objc_stubs");
-    put64(&mut b, 296, 0x1180);
+    put64(&mut b, 296, 0x11c0);
     put64(&mut b, 304, 32);
     put32(&mut b, 312, 448);
     put32(&mut b, 448, 0x90000001); // adrp x1, current page
-    put32(&mut b, 452, 0xf940ac21); // ldr x1, [x1, #0x158] -> "a", not "b"
+    put32(&mut b, 452, 0xf940d421); // ldr x1, [x1, #0x1a8] -> "a", not "b"
     let image = MachOImage::parse(&b).unwrap();
     assert_eq!(
-        image.objc.selector_stubs.get(&0x1180).map(String::as_str),
+        image
+            .objc
+            .selector_references
+            .get(&0x11a8)
+            .map(String::as_str),
         Some("a")
     );
+    assert!(image.objc.selector_stubs.is_empty()); // no verified objc_msgSend tail
     put32(&mut b, 448, 0); // unrecognized instruction must not invent a selector
     assert!(MachOImage::parse(&b)
         .unwrap()

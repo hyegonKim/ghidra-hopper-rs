@@ -2,6 +2,7 @@
 /validation/other_entries/build/
 /validation/remaining_paths/build/
 /validation/jni_runtime/build/
+/validation/wide/build/
 .DS_Store
 *.orig
 *.jar
