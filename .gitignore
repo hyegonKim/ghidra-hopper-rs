@@ -3,6 +3,7 @@
 /validation/remaining_paths/build/
 /validation/jni_runtime/build/
 /validation/wide/build/
+/validation/conditional_compare/build/
 .DS_Store
 *.orig
 *.jar

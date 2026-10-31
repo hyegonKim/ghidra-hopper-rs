@@ -76,6 +76,35 @@ impl Machine {
     }
     fn execute(&mut self, op: &PcodeOp, next: &mut u64, halt: &mut bool) {
         match op {
+            PcodeOp::ConditionalCompare {
+                lhs,
+                rhs,
+                width,
+                condition,
+                nzcv,
+                subtract,
+            } => {
+                self.flags = ghidra_hopper_rs::arm64_integer::conditional_compare(
+                    self.read(*lhs),
+                    self.read(*rhs),
+                    *width,
+                    *condition,
+                    *nzcv,
+                    *subtract,
+                    ghidra_hopper_rs::arm64_flags::Nzcv::from_bits(self.flags),
+                )
+                .unwrap()
+                .bits();
+            }
+            PcodeOp::SignedMultiplyHigh { dst, lhs, rhs } => {
+                let value = ghidra_hopper_rs::arm64_integer::signed_multiply_high(
+                    self.read(*lhs),
+                    self.read(*rhs),
+                );
+                if let Some(dst) = dst {
+                    self.write(*dst, value);
+                }
+            }
             PcodeOp::Logical {
                 dst,
                 lhs,
@@ -295,6 +324,11 @@ impl Machine {
                 }
             }
             PcodeOp::Branch { target } => *next = *target,
+            PcodeOp::FlagBranch { condition, target } => {
+                if condition.holds(ghidra_hopper_rs::arm64_flags::Nzcv::from_bits(self.flags)) {
+                    *next = *target;
+                }
+            }
             PcodeOp::Return { .. } => *halt = true,
             PcodeOp::Nop | PcodeOp::Bti { .. } => {}
             _ => panic!("unexpected op: {op:?}"),

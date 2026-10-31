@@ -101,6 +101,29 @@ pub fn multiply_add(a: u64, b: u64, c: u64, width: u8, subtract: bool) -> Option
         }) & mask(width)?,
     )
 }
+pub fn conditional_compare(
+    lhs: u64,
+    rhs: u64,
+    width: u8,
+    condition: Condition,
+    nzcv: u8,
+    subtract: bool,
+    incoming: Nzcv,
+) -> Option<Nzcv> {
+    mask(width)?;
+    if nzcv > 15 {
+        return None;
+    }
+    Some(if condition.holds(incoming) {
+        arithmetic(lhs, rhs, width, subtract)?.1
+    } else {
+        Nzcv::from_bits(nzcv)
+    })
+}
+pub fn signed_multiply_high(lhs: u64, rhs: u64) -> u64 {
+    let product = (lhs as i64 as i128) * (rhs as i64 as i128);
+    (product >> 64) as u64
+}
 fn read(r: u64, size: u8) -> Varnode {
     if r == 31 {
         Varnode::imm(0, size)
@@ -137,7 +160,48 @@ pub fn decode(address: u64, word: u32) -> Option<DecodedInstruction> {
     let rm = ((word >> 16) & 31) as u64;
     let immediate = word & 0x1f800000 == 0x12000000;
     let register = word & 0x1f000000 == 0x0a000000;
-    if immediate || register {
+    if word & 0x3fe00410 == 0x3a400000 {
+        let condition = Condition::from_code(((word >> 12) & 15) as u8)?;
+        let nzcv = (word & 15) as u8;
+        let subtract = word & (1 << 30) != 0;
+        let immediate = word & (1 << 11) != 0;
+        let rhs = if immediate {
+            Varnode::imm(rm, size)
+        } else {
+            read(rm, size)
+        };
+        i.mnemonic = if subtract { "ccmp" } else { "ccmn" }.into();
+        i.raw_args = vec![
+            name(rn, size),
+            if immediate {
+                format!("#{rm}")
+            } else {
+                name(rm, size)
+            },
+            format!("#{nzcv}"),
+            condition.name().into(),
+        ];
+        i.pcode = vec![PcodeOp::ConditionalCompare {
+            lhs: read(rn, size),
+            rhs,
+            width,
+            condition,
+            nzcv,
+            subtract,
+        }];
+    } else if word & 0xffe0fc00 == 0x9b407c00 {
+        i.mnemonic = "smulh".into();
+        i.raw_args = vec![name(rd, 8), name(rn, 8), name(rm, 8)];
+        i.pcode = vec![PcodeOp::SignedMultiplyHigh {
+            dst: if rd == 31 {
+                None
+            } else {
+                Some(Varnode::reg(rd, 8))
+            },
+            lhs: read(rn, 8),
+            rhs: read(rm, 8),
+        }];
+    } else if immediate || register {
         let opc = (word >> 29) & 3;
         let invert = register && word & (1 << 21) != 0;
         if opc == 1 && !invert {

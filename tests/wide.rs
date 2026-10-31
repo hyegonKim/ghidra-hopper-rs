@@ -84,7 +84,7 @@ fn extension_and_multiply_width_boundaries_wrap_without_signed_host_overflow() {
 fn reserved_encodings_and_different_instruction_families_stay_unsupported() {
     for w in [
         0x0a018000, 0x12400000, 0xf240fc00, 0x9a810800, 0xba810400, 0x8b211400, 0xcbc10000,
-        0x9b210000, 0xfa4008c4, 0x69400400, 0xfc800000, 0x7dc00000,
+        0x9b210000, 0xfa400cd4, 0x69400400, 0xfc800000, 0x7dc00000,
     ] {
         assert!(
             matches!(decode(w).pcode.first(), Some(PcodeOp::Unsupported { .. })),

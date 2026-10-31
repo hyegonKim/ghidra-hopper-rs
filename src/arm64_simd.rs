@@ -1,4 +1,4 @@
-//! Bitmask MOVI D/V.2D and 128-bit SIMD pair transfers. Vector indices are
+//! Bitmask MOVI and SIMD B/H/S/D/Q transfers. Vector indices are
 //! deliberately separate from GPR Varnodes, including V31 versus SP/ZR.
 use crate::pcode_sleigh::{DecodedInstruction, PcodeOp, SpaceKind, Varnode};
 pub fn expanded_bytes(immediate: u8) -> u64 {
@@ -32,7 +32,88 @@ pub fn decode(address: u64, word: u32) -> Option<DecodedInstruction> {
         call_ref: None,
         pcode: vec![],
     };
-    if word & 0xbff8fc00 == 0x2f00e400 {
+    if word & 0x3f200c00 == 0x3c200800 {
+        let scale = (word >> 30) & 3;
+        let opc = (word >> 22) & 3;
+        if opc >= 2 && scale != 0 {
+            return None;
+        }
+        let size = if opc >= 2 { 16 } else { 1u8 << scale };
+        let load = opc & 1 != 0;
+        let (extend, index_size, modifier) = match (word >> 13) & 7 {
+            2 => (crate::arm64_indexed::IndexExtend::Uxtw, 4, "uxtw"),
+            3 => (crate::arm64_indexed::IndexExtend::Uxtx, 8, "lsl"),
+            6 => (crate::arm64_indexed::IndexExtend::Sxtw, 4, "sxtw"),
+            7 => (crate::arm64_indexed::IndexExtend::Sxtx, 8, "sxtx"),
+            _ => return None,
+        };
+        let shift = if word & (1 << 12) != 0 {
+            size.trailing_zeros() as u8
+        } else {
+            0
+        };
+        let rn = ((word >> 5) & 31) as u64;
+        let rm = ((word >> 16) & 31) as u64;
+        let register = (word & 31) as u8;
+        let base = Varnode::reg(rn, 8);
+        let index = if rm == 31 {
+            Varnode::imm(0, index_size)
+        } else {
+            Varnode::reg(rm, index_size)
+        };
+        let index_name = if rm == 31 {
+            if index_size == 4 { "wzr" } else { "xzr" }.into()
+        } else {
+            index.display_arm64()
+        };
+        let prefix = match size {
+            1 => "b",
+            2 => "h",
+            4 => "s",
+            8 => "d",
+            _ => "q",
+        };
+        i.mnemonic = if load { "ldr" } else { "str" }.into();
+        i.raw_args = vec![
+            format!("{prefix}{register}"),
+            format!(
+                "[{}, {index_name}, {modifier} #{shift}]",
+                base.display_arm64()
+            ),
+        ];
+        i.pcode = vec![PcodeOp::RegisterOffset {
+            dst: temp(0),
+            base,
+            index,
+            extend,
+            shift,
+        }];
+        i.pcode.push(if size == 16 {
+            if load {
+                PcodeOp::VectorLoad {
+                    register,
+                    addr: temp(0),
+                }
+            } else {
+                PcodeOp::VectorStore {
+                    register,
+                    addr: temp(0),
+                }
+            }
+        } else if load {
+            PcodeOp::VectorLoadSized {
+                register,
+                addr: temp(0),
+                size,
+            }
+        } else {
+            PcodeOp::VectorStoreSized {
+                register,
+                addr: temp(0),
+                size,
+            }
+        });
+    } else if word & 0xbff8fc00 == 0x2f00e400 {
         let register = (word & 31) as u8;
         let full = word & (1 << 30) != 0;
         let imm = ((((word >> 16) & 7) << 5) | ((word >> 5) & 31)) as u8;

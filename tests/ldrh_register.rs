@@ -215,7 +215,7 @@ fn reserved_extensions_and_different_load_kinds_are_not_accepted() {
             PcodeOp::Unsupported { .. }
         ));
     }
-    for w in [0xf8a16800, 0x38a16800, 0x78a16800, 0x7c616800] {
+    for w in [0xf8a16800, 0x38a16800, 0x78a16800, 0x7c210800] {
         assert!(
             !matches!(decode(w).pcode[0], PcodeOp::RegisterOffset { .. }),
             "{w:x}"

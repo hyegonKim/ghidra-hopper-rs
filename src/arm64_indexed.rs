@@ -18,7 +18,8 @@ pub fn address(base: u64, index: u64, extend: IndexExtend, shift: u8) -> Option<
 }
 
 pub fn offset_address(base: u64, index: u64, extend: IndexExtend, shift: u8) -> Option<u64> {
-    if shift > 3 {
+    // Q register-offset loads scale by 16; integer transfers still decode 0..3.
+    if shift > 4 {
         return None;
     }
     let offset = match extend {

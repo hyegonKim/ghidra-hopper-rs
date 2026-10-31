@@ -202,7 +202,7 @@ fn indexed_integer_transfers_extend_before_scaling_and_capture_addresses() {
         .pcode
         .iter()
         .any(|op| matches!(op, PcodeOp::SignExtend { .. })));
-    for w in [0x3c616800, 0xf8a16800, 0x38a16800, 0xf8610800] {
+    for w in [0x3c210800, 0xf8a16800, 0x38a16800, 0xf8610800] {
         assert!(matches!(decode(w).pcode[0], PcodeOp::Unsupported { .. }));
     }
 }
