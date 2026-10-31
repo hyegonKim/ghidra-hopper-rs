@@ -1,0 +1,2189 @@
+{
+  "baseline_commit": "1d6dcf383f23406ff33934ab3944b7d41bee5053",
+  "sha256": {
+    "baseline": "094dcdf9d43a2b2395fc5c9e9bd4683ec999c4e7b39ce8f74b193b35151af9df",
+    "candidate": "f60930bb9ffadf2de9259bb44ebf8e92141a308e7e857e41c52d5a43cb651606",
+    "elf": "d3e48717c9aa147e0ab21063ba0e8e0211cabf8bf40b222640829519edbf58e1",
+    "hopper": "dad6f886261fad0d4cdd01aee6fcf57439c60d7b5c54e62fc97f0180116690e0"
+  },
+  "runtime_pairs": [
+    {
+      "profile": "default-1.json",
+      "budget": 128,
+      "before": {
+        "exit": 2,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [
+          "x3"
+        ],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      },
+      "after": {
+        "exit": 0,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": [
+          "ThrowNew"
+        ]
+      }
+    },
+    {
+      "profile": "default-1.json",
+      "budget": 512,
+      "before": {
+        "exit": 2,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [
+          "x3"
+        ],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      },
+      "after": {
+        "exit": 0,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": [
+          "ThrowNew"
+        ]
+      }
+    },
+    {
+      "profile": "default-1.json",
+      "budget": 2048,
+      "before": {
+        "exit": 2,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [
+          "x3"
+        ],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      },
+      "after": {
+        "exit": 0,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": [
+          "ThrowNew"
+        ]
+      }
+    },
+    {
+      "profile": "default-2.json",
+      "budget": 128,
+      "before": {
+        "exit": 2,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [
+          "x3"
+        ],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      },
+      "after": {
+        "exit": 0,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": [
+          "ThrowNew"
+        ]
+      }
+    },
+    {
+      "profile": "default-2.json",
+      "budget": 512,
+      "before": {
+        "exit": 2,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [
+          "x3"
+        ],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      },
+      "after": {
+        "exit": 0,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": [
+          "ThrowNew"
+        ]
+      }
+    },
+    {
+      "profile": "default-2.json",
+      "budget": 2048,
+      "before": {
+        "exit": 2,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [
+          "x3"
+        ],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      },
+      "after": {
+        "exit": 0,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": [
+          "ThrowNew"
+        ]
+      }
+    },
+    {
+      "profile": "checkjni-1.json",
+      "budget": 128,
+      "before": {
+        "exit": 2,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [
+          "x3"
+        ],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      },
+      "after": {
+        "exit": 0,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": [
+          "ThrowNew"
+        ]
+      }
+    },
+    {
+      "profile": "checkjni-1.json",
+      "budget": 512,
+      "before": {
+        "exit": 2,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [
+          "x3"
+        ],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      },
+      "after": {
+        "exit": 0,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": [
+          "ThrowNew"
+        ]
+      }
+    },
+    {
+      "profile": "checkjni-1.json",
+      "budget": 2048,
+      "before": {
+        "exit": 2,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [
+          "x3"
+        ],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      },
+      "after": {
+        "exit": 0,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": [
+          "ThrowNew"
+        ]
+      }
+    },
+    {
+      "profile": "checkjni-2.json",
+      "budget": 128,
+      "before": {
+        "exit": 2,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [
+          "x3"
+        ],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      },
+      "after": {
+        "exit": 0,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": [
+          "ThrowNew"
+        ]
+      }
+    },
+    {
+      "profile": "checkjni-2.json",
+      "budget": 512,
+      "before": {
+        "exit": 2,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [
+          "x3"
+        ],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      },
+      "after": {
+        "exit": 0,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": [
+          "ThrowNew"
+        ]
+      }
+    },
+    {
+      "profile": "checkjni-2.json",
+      "budget": 2048,
+      "before": {
+        "exit": 2,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [
+          "x3"
+        ],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      },
+      "after": {
+        "exit": 0,
+        "decoded": 23,
+        "work": 23,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4",
+          "0xdc8",
+          "0xdcc",
+          "0xdd0",
+          "0xdd4",
+          "0xdd8"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": [
+          "ThrowNew"
+        ]
+      }
+    }
+  ],
+  "budget_prefix_checks": [
+    {
+      "profile": "default-1.json",
+      "budget": 1,
+      "after": {
+        "exit": 2,
+        "decoded": 1,
+        "work": 1,
+        "addresses": [
+          "0xd80"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      }
+    },
+    {
+      "profile": "default-1.json",
+      "budget": 9,
+      "after": {
+        "exit": 2,
+        "decoded": 9,
+        "work": 9,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      }
+    },
+    {
+      "profile": "default-1.json",
+      "budget": 10,
+      "after": {
+        "exit": 2,
+        "decoded": 10,
+        "work": 10,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": []
+      }
+    },
+    {
+      "profile": "default-1.json",
+      "budget": 18,
+      "after": {
+        "exit": 2,
+        "decoded": 18,
+        "work": 18,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": []
+      }
+    },
+    {
+      "profile": "default-2.json",
+      "budget": 1,
+      "after": {
+        "exit": 2,
+        "decoded": 1,
+        "work": 1,
+        "addresses": [
+          "0xd80"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      }
+    },
+    {
+      "profile": "default-2.json",
+      "budget": 9,
+      "after": {
+        "exit": 2,
+        "decoded": 9,
+        "work": 9,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      }
+    },
+    {
+      "profile": "default-2.json",
+      "budget": 10,
+      "after": {
+        "exit": 2,
+        "decoded": 10,
+        "work": 10,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": []
+      }
+    },
+    {
+      "profile": "default-2.json",
+      "budget": 18,
+      "after": {
+        "exit": 2,
+        "decoded": 18,
+        "work": 18,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": []
+      }
+    },
+    {
+      "profile": "checkjni-1.json",
+      "budget": 1,
+      "after": {
+        "exit": 2,
+        "decoded": 1,
+        "work": 1,
+        "addresses": [
+          "0xd80"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      }
+    },
+    {
+      "profile": "checkjni-1.json",
+      "budget": 9,
+      "after": {
+        "exit": 2,
+        "decoded": 9,
+        "work": 9,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      }
+    },
+    {
+      "profile": "checkjni-1.json",
+      "budget": 10,
+      "after": {
+        "exit": 2,
+        "decoded": 10,
+        "work": 10,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": []
+      }
+    },
+    {
+      "profile": "checkjni-1.json",
+      "budget": 18,
+      "after": {
+        "exit": 2,
+        "decoded": 18,
+        "work": 18,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": []
+      }
+    },
+    {
+      "profile": "checkjni-2.json",
+      "budget": 1,
+      "after": {
+        "exit": 2,
+        "decoded": 1,
+        "work": 1,
+        "addresses": [
+          "0xd80"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      }
+    },
+    {
+      "profile": "checkjni-2.json",
+      "budget": 9,
+      "after": {
+        "exit": 2,
+        "decoded": 9,
+        "work": 9,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [],
+        "runtime_tail_calls": []
+      }
+    },
+    {
+      "profile": "checkjni-2.json",
+      "budget": 10,
+      "after": {
+        "exit": 2,
+        "decoded": 10,
+        "work": 10,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": []
+      }
+    },
+    {
+      "profile": "checkjni-2.json",
+      "budget": 18,
+      "after": {
+        "exit": 2,
+        "decoded": 18,
+        "work": 18,
+        "addresses": [
+          "0xd80",
+          "0xd84",
+          "0xd88",
+          "0xd8c",
+          "0xd90",
+          "0xd94",
+          "0xd98",
+          "0xd9c",
+          "0xda0",
+          "0xda4",
+          "0xda8",
+          "0xdac",
+          "0xdb0",
+          "0xdb4",
+          "0xdb8",
+          "0xdbc",
+          "0xdc0",
+          "0xdc4"
+        ],
+        "unsupported": [],
+        "indirect_registers": [],
+        "runtime_calls": [
+          "FindClass"
+        ],
+        "runtime_tail_calls": []
+      }
+    }
+  ],
+  "no_context_controls": [
+    {
+      "binary": "hopper",
+      "entry": "0x100000a58",
+      "budget": 128,
+      "decoded": 7,
+      "work": 7,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000a58",
+      "budget": 512,
+      "decoded": 7,
+      "work": 7,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000a58",
+      "budget": 2048,
+      "decoded": 7,
+      "work": 7,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000a60",
+      "budget": 128,
+      "decoded": 128,
+      "work": 128,
+      "exit": 2
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000a60",
+      "budget": 512,
+      "decoded": 173,
+      "work": 173,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000a60",
+      "budget": 2048,
+      "decoded": 173,
+      "work": 173,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000d08",
+      "budget": 128,
+      "decoded": 9,
+      "work": 9,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000d08",
+      "budget": 512,
+      "decoded": 9,
+      "work": 9,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000d08",
+      "budget": 2048,
+      "decoded": 9,
+      "work": 9,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000d20",
+      "budget": 128,
+      "decoded": 26,
+      "work": 26,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000d20",
+      "budget": 512,
+      "decoded": 26,
+      "work": 26,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000d20",
+      "budget": 2048,
+      "decoded": 26,
+      "work": 26,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000d88",
+      "budget": 128,
+      "decoded": 23,
+      "work": 23,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000d88",
+      "budget": 512,
+      "decoded": 23,
+      "work": 23,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000d88",
+      "budget": 2048,
+      "decoded": 23,
+      "work": 23,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000de4",
+      "budget": 128,
+      "decoded": 24,
+      "work": 24,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000de4",
+      "budget": 512,
+      "decoded": 24,
+      "work": 24,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000de4",
+      "budget": 2048,
+      "decoded": 24,
+      "work": 24,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000e44",
+      "budget": 128,
+      "decoded": 128,
+      "work": 128,
+      "exit": 2
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000e44",
+      "budget": 512,
+      "decoded": 228,
+      "work": 228,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100000e44",
+      "budget": 2048,
+      "decoded": 228,
+      "work": 228,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x1000011c8",
+      "budget": 128,
+      "decoded": 128,
+      "work": 128,
+      "exit": 2
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x1000011c8",
+      "budget": 512,
+      "decoded": 170,
+      "work": 170,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x1000011c8",
+      "budget": 2048,
+      "decoded": 170,
+      "work": 170,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100001464",
+      "budget": 128,
+      "decoded": 128,
+      "work": 128,
+      "exit": 2
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100001464",
+      "budget": 512,
+      "decoded": 186,
+      "work": 186,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100001464",
+      "budget": 2048,
+      "decoded": 186,
+      "work": 186,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100001740",
+      "budget": 128,
+      "decoded": 128,
+      "work": 128,
+      "exit": 2
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100001740",
+      "budget": 512,
+      "decoded": 512,
+      "work": 512,
+      "exit": 2
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100001740",
+      "budget": 2048,
+      "decoded": 824,
+      "work": 824,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100002420",
+      "budget": 128,
+      "decoded": 45,
+      "work": 45,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100002420",
+      "budget": 512,
+      "decoded": 45,
+      "work": 45,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100002420",
+      "budget": 2048,
+      "decoded": 45,
+      "work": 45,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x1000024c8",
+      "budget": 128,
+      "decoded": 30,
+      "work": 30,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x1000024c8",
+      "budget": 512,
+      "decoded": 30,
+      "work": 30,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x1000024c8",
+      "budget": 2048,
+      "decoded": 30,
+      "work": 30,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100002534",
+      "budget": 128,
+      "decoded": 49,
+      "work": 49,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100002534",
+      "budget": 512,
+      "decoded": 49,
+      "work": 49,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100002534",
+      "budget": 2048,
+      "decoded": 49,
+      "work": 49,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x1000025ec",
+      "budget": 128,
+      "decoded": 128,
+      "work": 128,
+      "exit": 2
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x1000025ec",
+      "budget": 512,
+      "decoded": 247,
+      "work": 247,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x1000025ec",
+      "budget": 2048,
+      "decoded": 247,
+      "work": 247,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x1000029bc",
+      "budget": 128,
+      "decoded": 128,
+      "work": 128,
+      "exit": 2
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x1000029bc",
+      "budget": 512,
+      "decoded": 205,
+      "work": 205,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x1000029bc",
+      "budget": 2048,
+      "decoded": 205,
+      "work": 205,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100002cf0",
+      "budget": 128,
+      "decoded": 59,
+      "work": 128,
+      "exit": 2
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100002cf0",
+      "budget": 512,
+      "decoded": 59,
+      "work": 512,
+      "exit": 2
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100002cf0",
+      "budget": 2048,
+      "decoded": 59,
+      "work": 883,
+      "exit": 0
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100002ddc",
+      "budget": 128,
+      "decoded": 128,
+      "work": 128,
+      "exit": 2
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100002ddc",
+      "budget": 512,
+      "decoded": 512,
+      "work": 512,
+      "exit": 2
+    },
+    {
+      "binary": "hopper",
+      "entry": "0x100002ddc",
+      "budget": 2048,
+      "decoded": 1121,
+      "work": 1945,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xd80",
+      "budget": 128,
+      "decoded": 23,
+      "work": 23,
+      "exit": 2
+    },
+    {
+      "binary": "elf",
+      "entry": "0xd80",
+      "budget": 512,
+      "decoded": 23,
+      "work": 23,
+      "exit": 2
+    },
+    {
+      "binary": "elf",
+      "entry": "0xd80",
+      "budget": 2048,
+      "decoded": 23,
+      "work": 23,
+      "exit": 2
+    },
+    {
+      "binary": "elf",
+      "entry": "0xddc",
+      "budget": 128,
+      "decoded": 30,
+      "work": 30,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xddc",
+      "budget": 512,
+      "decoded": 30,
+      "work": 30,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xddc",
+      "budget": 2048,
+      "decoded": 30,
+      "work": 30,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xfc8",
+      "budget": 128,
+      "decoded": 8,
+      "work": 8,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xfc8",
+      "budget": 512,
+      "decoded": 8,
+      "work": 8,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xfc8",
+      "budget": 2048,
+      "decoded": 8,
+      "work": 8,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xf44",
+      "budget": 128,
+      "decoded": 9,
+      "work": 9,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xf44",
+      "budget": 512,
+      "decoded": 9,
+      "work": 9,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xf44",
+      "budget": 2048,
+      "decoded": 9,
+      "work": 9,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xe54",
+      "budget": 128,
+      "decoded": 48,
+      "work": 48,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xe54",
+      "budget": 512,
+      "decoded": 48,
+      "work": 48,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xe54",
+      "budget": 2048,
+      "decoded": 48,
+      "work": 48,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xf68",
+      "budget": 128,
+      "decoded": 22,
+      "work": 22,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xf68",
+      "budget": 512,
+      "decoded": 22,
+      "work": 22,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xf68",
+      "budget": 2048,
+      "decoded": 22,
+      "work": 22,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xf14",
+      "budget": 128,
+      "decoded": 6,
+      "work": 6,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xf14",
+      "budget": 512,
+      "decoded": 6,
+      "work": 6,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xf14",
+      "budget": 2048,
+      "decoded": 6,
+      "work": 6,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xfc0",
+      "budget": 128,
+      "decoded": 2,
+      "work": 2,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xfc0",
+      "budget": 512,
+      "decoded": 2,
+      "work": 2,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xfc0",
+      "budget": 2048,
+      "decoded": 2,
+      "work": 2,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xf2c",
+      "budget": 128,
+      "decoded": 6,
+      "work": 6,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xf2c",
+      "budget": 512,
+      "decoded": 6,
+      "work": 6,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xf2c",
+      "budget": 2048,
+      "decoded": 6,
+      "work": 6,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xd30",
+      "budget": 128,
+      "decoded": 8,
+      "work": 8,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xd30",
+      "budget": 512,
+      "decoded": 8,
+      "work": 8,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xd30",
+      "budget": 2048,
+      "decoded": 8,
+      "work": 8,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xf10",
+      "budget": 128,
+      "decoded": 1,
+      "work": 1,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xf10",
+      "budget": 512,
+      "decoded": 1,
+      "work": 1,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xf10",
+      "budget": 2048,
+      "decoded": 1,
+      "work": 1,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xff0",
+      "budget": 128,
+      "decoded": 12,
+      "work": 12,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xff0",
+      "budget": 512,
+      "decoded": 12,
+      "work": 12,
+      "exit": 0
+    },
+    {
+      "binary": "elf",
+      "entry": "0xff0",
+      "budget": 2048,
+      "decoded": 12,
+      "work": 12,
+      "exit": 0
+    }
+  ],
+  "invalid_context_checks": [
+    {
+      "case": "wrong-elf",
+      "exit": 1
+    },
+    {
+      "case": "wrong-art",
+      "exit": 1
+    },
+    {
+      "case": "wrong-x3",
+      "exit": 1
+    },
+    {
+      "case": "wrong-code",
+      "exit": 1
+    },
+    {
+      "case": "nonexecutable",
+      "exit": 1
+    },
+    {
+      "case": "traversal",
+      "exit": 1
+    },
+    {
+      "case": "missing-art",
+      "exit": 1
+    },
+    {
+      "case": "malformed",
+      "exit": 1
+    },
+    {
+      "case": "invalid-option-8",
+      "exit": 1
+    },
+    {
+      "case": "invalid-option-9",
+      "exit": 1
+    },
+    {
+      "case": "invalid-option-10",
+      "exit": 1
+    },
+    {
+      "case": "wrong-entry",
+      "exit": 1
+    }
+  ],
+  "captures": {
+    "default-1": {
+      "pid": 7310,
+      "table": "0x73b4a0e198",
+      "x3": "0x73b479f7c8",
+      "art_sha256": "2ed780ea89adc6540d0a1ea1a68d563c5da0837eeb9f50e474919dc7f783f721",
+      "calls": {
+        "uninstrumented": 0,
+        "instrumented": 0,
+        "trap_hits": 1,
+        "exception_class": "java/io/IOException",
+        "message": "REA real Android JNI BR x3",
+        "message_verified": true
+      },
+      "thrownew_module": {
+        "path": "/apex/com.android.art/lib64/libart.so",
+        "base": "0x73b4200000",
+        "offset": "0x59f7c8",
+        "symbol": ""
+      }
+    },
+    "default-2": {
+      "pid": 7327,
+      "table": "0x6f4f20e198",
+      "x3": "0x6f4ef9f7c8",
+      "art_sha256": "2ed780ea89adc6540d0a1ea1a68d563c5da0837eeb9f50e474919dc7f783f721",
+      "calls": {
+        "uninstrumented": 0,
+        "instrumented": 0,
+        "trap_hits": 1,
+        "exception_class": "java/io/IOException",
+        "message": "REA real Android JNI BR x3",
+        "message_verified": true
+      },
+      "thrownew_module": {
+        "path": "/apex/com.android.art/lib64/libart.so",
+        "base": "0x6f4ea00000",
+        "offset": "0x59f7c8",
+        "symbol": ""
+      }
+    },
+    "checkjni-1": {
+      "pid": 7344,
+      "table": "0x76ac80d9a8",
+      "x3": "0x76ac56e130",
+      "art_sha256": "2ed780ea89adc6540d0a1ea1a68d563c5da0837eeb9f50e474919dc7f783f721",
+      "calls": {
+        "uninstrumented": 0,
+        "instrumented": 0,
+        "trap_hits": 1,
+        "exception_class": "java/io/IOException",
+        "message": "REA real Android JNI BR x3",
+        "message_verified": true
+      },
+      "thrownew_module": {
+        "path": "/apex/com.android.art/lib64/libart.so",
+        "base": "0x76ac000000",
+        "offset": "0x56e130",
+        "symbol": ""
+      }
+    },
+    "checkjni-2": {
+      "pid": 7361,
+      "table": "0x751020d9a8",
+      "x3": "0x750ff6e130",
+      "art_sha256": "2ed780ea89adc6540d0a1ea1a68d563c5da0837eeb9f50e474919dc7f783f721",
+      "calls": {
+        "uninstrumented": 0,
+        "instrumented": 0,
+        "trap_hits": 1,
+        "exception_class": "java/io/IOException",
+        "message": "REA real Android JNI BR x3",
+        "message_verified": true
+      },
+      "thrownew_module": {
+        "path": "/apex/com.android.art/lib64/libart.so",
+        "base": "0x750fa00000",
+        "offset": "0x56e130",
+        "symbol": ""
+      }
+    }
+  },
+  "comparison_note": "Baseline accepts and silently ignores the trailing runtime option; candidate validates and applies it. Primary file, entry, budget and supplied capture are identical.",
+  "scope": "Real ARM64 Android ART app_process loading the original ELF; not the original MetaTrader app process, not a physical device. Offline capture, not live attestation or external ART-body decompilation."
+}

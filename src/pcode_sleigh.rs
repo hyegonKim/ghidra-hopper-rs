@@ -241,6 +241,14 @@ pub enum PcodeOp {
     CallInd {
         target: Varnode,
     },
+    /// JNI binding from explicit offline runtime evidence, scoped to that capture.
+    RuntimeJniCall {
+        target_reg: Varnode,
+        table: u64,
+        target: u64,
+        slot: u16,
+        tail: bool,
+    },
     Unsupported {
         word: u32,
     },
@@ -836,6 +844,11 @@ pub fn decompile_instructions_to_pseudocode_with_aliases(
                         "    call_indirect({}); // signature unknown\n",
                         target.display_arm64_with_aliases(reg_aliases)
                     ));
+                }
+                PcodeOp::RuntimeJniCall { target_reg, table, target, slot, tail } => {
+                    reg_consts.retain(|reg, _| *reg > 18);
+                    let operation = crate::jni_runtime::operation(*slot).unwrap_or("unknown");
+                    out.push_str(&format!("    {}({operation:?}, via={}, table=0x{table:x}, target=0x{target:x}); // captured JNI slot {slot}; pending exception possible; native return allowed\n", if *tail {"tailcall_runtime_jni"} else {"call_runtime_jni"},target_reg.display_arm64_with_aliases(reg_aliases)));
                 }
                 PcodeOp::Copy { dst, src } => {
                     if dst.space == SpaceKind::Register {

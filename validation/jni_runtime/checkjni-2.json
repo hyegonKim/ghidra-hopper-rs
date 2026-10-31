@@ -1,0 +1,71 @@
+{
+  "schema": 1,
+  "source": "android-art-process-private-brk",
+  "abi": "arm64-v8a",
+  "pid": 7361,
+  "sdk": "32",
+  "fingerprint": "google/sdk_gphone64_arm64/emulator64_arm64:12/S2B2.211203.006/8015633:userdebug/dev-keys",
+  "env": "0xb4000075d17a8d70",
+  "table": "0x751020d9a8",
+  "entry": "0x74ffe4cd80",
+  "branch_pc": "0x74ffe4cdc8",
+  "x0": "0xb4000075d17a8d70",
+  "x1": "0xc5",
+  "x2": "0x74ffeb1d95",
+  "x3": "0x750ff6e130",
+  "original_word": "0xd61f0060",
+  "restored_word": "0xd61f0060",
+  "table_stable": true,
+  "target_module": {
+    "path": "/data/local/tmp/rea-jni-brx3-7344/libdatastore_shared_counter.so",
+    "base": "0x74ffe4c000",
+    "offset": "0xd80",
+    "symbol": "_Z16ThrowIoExceptionP7_JNIEnvPKc"
+  },
+  "slots": [
+    {
+      "index": 6,
+      "name": "FindClass",
+      "value": "0x750ff6a574",
+      "module": {
+        "path": "/apex/com.android.art/lib64/libart.so",
+        "base": "0x750fa00000",
+        "offset": "0x56a574",
+        "symbol": ""
+      },
+      "code16": "ff4303d1fd7b07a9fb4300f9fa6709a9"
+    },
+    {
+      "index": 14,
+      "name": "ThrowNew",
+      "value": "0x750ff6e130",
+      "module": {
+        "path": "/apex/com.android.art/lib64/libart.so",
+        "base": "0x750fa00000",
+        "offset": "0x56e130",
+        "symbol": ""
+      },
+      "code16": "ff4303d1fd7b07a9fc6f08a9fa6709a9"
+    }
+  ],
+  "calls": {
+    "uninstrumented": 0,
+    "instrumented": 0,
+    "trap_hits": 1,
+    "exception_class": "java/io/IOException",
+    "message": "REA real Android JNI BR x3",
+    "message_verified": true
+  },
+  "maps": [
+    "74ffe4c000-74ffe4d000 r-xp 00000000 fe:1d 81951                          /data/local/tmp/rea-jni-brx3-7344/libdatastore_shared_counter.so",
+    "750fc00000-75101fe000 r-xp 00200000 fe:16 57                             /apex/com.android.art/lib64/libart.so",
+    "7510200000-7510213000 r--p 00800000 fe:16 57                             /apex/com.android.art/lib64/libart.so",
+    "75d17a6000-75d17e6000 rw-p 00000000 00:00 0                              [anon:scudo:primary]"
+  ],
+  "binary_sha256": "d3e48717c9aa147e0ab21063ba0e8e0211cabf8bf40b222640829519edbf58e1",
+  "runtime_sha256": "2ed780ea89adc6540d0a1ea1a68d563c5da0837eeb9f50e474919dc7f783f721",
+  "runtime_image": "build/libart.so",
+  "captured_at": "2026-10-31T10:34:14.139737+00:00",
+  "requested_mode": "checkjni",
+  "capture_provenance": "Local controlled Android ART execution; supplied offline evidence, not attestation"
+}

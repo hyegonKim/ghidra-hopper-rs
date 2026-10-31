@@ -1,6 +1,7 @@
 /target/
 /validation/other_entries/build/
 /validation/remaining_paths/build/
+/validation/jni_runtime/build/
 .DS_Store
 *.orig
 *.jar

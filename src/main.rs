@@ -4,6 +4,7 @@ use ghidra_hopper_rs::mcp_server;
 use ghidra_hopper_rs::segment::{demangle_symbol, OperandFormat, OperandFormatKind, Segment, Tag};
 use std::env;
 use std::fs;
+use std::path::{Component, Path};
 use std::time::Instant;
 
 /// Builds a synthetic ARM64 `GhidraProgram` containing:
@@ -117,6 +118,13 @@ fn main() {
         if max_insns == 0 {
             fail("Instruction budget must be positive");
         }
+        let runtime_path = match args.get(6..) {
+            None | Some([]) => None,
+            Some([flag, path]) if flag == "--jni-runtime" => Some(path),
+            _ => fail(
+                "Usage: decompile <binary> <name> <entry> <budget> [--jni-runtime <capture.json>]",
+            ),
+        };
 
         let start_time = Instant::now();
         let raw_file = fs::read(target_path).unwrap_or_else(|err| fail(err));
@@ -151,6 +159,39 @@ fn main() {
         let mut analyzer = HopperHybridObjcAnalyzerRs::new();
         let mut proc =
             analyzer.analyze_function_zero_ipc(&mut prog, func_name, entry_addr, max_insns, &[]);
+        if let Some(path) = runtime_path {
+            if fs::metadata(path).unwrap_or_else(|e| fail(e)).len() > 262144 {
+                fail("JNI evidence size limit");
+            }
+            let profile = fs::read(path).unwrap_or_else(|e| fail(e));
+            let json: serde_json::Value =
+                serde_json::from_slice(&profile).unwrap_or_else(|e| fail(e));
+            let relative = json["runtime_image"]
+                .as_str()
+                .unwrap_or_else(|| fail("JNI capture requires runtime_image"));
+            if !Path::new(relative)
+                .components()
+                .all(|c| matches!(c, Component::Normal(_)))
+            {
+                fail("runtime_image must be a relative path inside the capture directory");
+            }
+            let art_path = Path::new(path)
+                .parent()
+                .unwrap_or(Path::new("."))
+                .join(relative);
+            if fs::metadata(&art_path).unwrap_or_else(|e| fail(e)).len() > 64 * 1024 * 1024 {
+                fail("ART image size limit");
+            }
+            let art = fs::read(art_path).unwrap_or_else(|e| fail(e));
+            let snapshot =
+                ghidra_hopper_rs::jni_runtime::RuntimeSnapshot::parse(&profile, &raw_file, &art)
+                    .unwrap_or_else(|e| fail(e));
+            let count = snapshot
+                .resolve(&mut prog, &mut proc)
+                .unwrap_or_else(|e| fail(e));
+            print!("{}", snapshot.summary());
+            println!("JNI runtime bindings applied: {count}");
+        }
         if let Some(first_bb) = proc.basic_blocks.first_mut() {
             first_bb
                 .tags

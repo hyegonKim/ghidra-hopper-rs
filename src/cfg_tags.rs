@@ -301,6 +301,10 @@ impl Procedure {
                                 Some(
                                     crate::pcode_sleigh::PcodeOp::ExternalTailCall { .. }
                                         | crate::pcode_sleigh::PcodeOp::MachOImportTailCall { .. }
+                                        | crate::pcode_sleigh::PcodeOp::RuntimeJniCall {
+                                            tail: true,
+                                            ..
+                                        }
                                 )
                             )
                     })
@@ -377,6 +381,18 @@ impl Procedure {
     pub fn render_four_modes(&self, seg: &Segment) -> String {
         let mut out = String::new();
         out.push_str(if self.is_incomplete() {"Analysis status: INCOMPLETE (unsupported instruction, unresolved edge, or instruction budget)\n"} else {"Analysis status: supported subset only; full semantic equivalence is unverified\n"});
+        if self
+            .basic_blocks
+            .iter()
+            .flat_map(|b| &b.instructions)
+            .any(|i| {
+                i.pcode
+                    .iter()
+                    .any(|op| matches!(op, crate::pcode_sleigh::PcodeOp::RuntimeJniCall { .. }))
+            })
+        {
+            out.push_str("Runtime JNI scope: supplied offline capture; stable JNIEnv table assumed; external ART body not analyzed\n");
+        }
         out.push_str(&format!(
             "Instruction work: {} (caller plus bounded callee proofs)\n",
             self.analysis_work
