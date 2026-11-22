@@ -112,26 +112,44 @@ public class HopperHybridObjcAnalyzer extends AbstractAnalyzer {
 		}
 
 		// Map __objc_selrefs pointers (x86_64 & ARM64) in O(1)
+		Map<Address, String> knownSelectors = new HashMap<>(objcStubSelectors);
+		Map<Address, String> selectorsByReference = new HashMap<>();
 		MemoryBlock selRefsBlock = mem.getBlock("__objc_selrefs");
-		if (selRefsBlock != null) {
-			long count = Math.min(selRefsBlock.getSize() / 8L, selectors.size());
+		if (selRefsBlock != null && program.getDefaultPointerSize() == 8) {
+			long count = Math.min(selRefsBlock.getSize() / 8L, 262144L / 3L);
 			for (int i = 0; i < count; i++) {
 				monitor.checkCancelled();
 				Address refSlot = selRefsBlock.getStart().add(i * 8L);
-				objcStubSelectors.put(refSlot, selectors.get(i));
+				try {
+					Address target = program.getAddressFactory().getDefaultAddressSpace()
+						.getAddress(mem.getLong(refSlot));
+					String selector = knownSelectors.get(target);
+					if (selector != null) {
+						selectorsByReference.put(refSlot, selector);
+						objcStubSelectors.put(refSlot, selector);
+					}
+				}
+				catch (MemoryAccessException | AddressOutOfBoundsException ignored) {
+					// Invalid references are not guessed by ordinal.
+				}
 			}
 		}
 
 		// Map __objc_stubs (ARM64 32-byte stubs) in O(1)
 		MemoryBlock stubsBlock = mem.getBlock("__objc_stubs");
-		if (stubsBlock != null) {
+		if (stubsBlock != null && program.getDefaultPointerSize() == 8 &&
+				program.getLanguageID().getIdAsString().startsWith("AARCH64:LE:64:")) {
 			long stride = 32L;
-			long count = Math.min(stubsBlock.getSize() / stride, selectors.size());
+			long count = Math.min(stubsBlock.getSize() / stride, 262144L / 3L);
 			FunctionManager funcMgr = program.getFunctionManager();
 			for (int i = 0; i < count; i++) {
 				monitor.checkCancelled();
 				Address stubAddr = stubsBlock.getStart().add(i * stride);
-				String sel = selectors.get(i);
+				Address reference;
+				try { reference = selectorReferenceForArm64Stub(program, mem, stubAddr); }
+				catch (MemoryAccessException ignored) { continue; }
+				String sel = selectorsByReference.get(reference);
+				if (sel == null) continue;
 				objcStubSelectors.put(stubAddr, sel);
 
 				Function f = funcMgr.getFunctionAt(stubAddr);
@@ -145,6 +163,30 @@ public class HopperHybridObjcAnalyzer extends AbstractAnalyzer {
 			}
 		}
 		return objcStubSelectors;
+	}
+
+	private static Address selectorReferenceForArm64Stub(Program program, Memory memory, Address pc)
+			throws MemoryAccessException {
+		Address second;
+		try {
+			second = pc.addNoWrap(4);
+			MemoryBlock block = memory.getBlock(pc);
+			if (block == null || !block.contains(pc.addNoWrap(7))) return null;
+		}
+		catch (AddressOverflowException ignored) { return null; }
+		int adrp = memory.getInt(pc), ldr = memory.getInt(second);
+		int base = adrp & 31;
+		if ((adrp & 0x9f000000) != 0x90000000 || base == 31 ||
+				(ldr & 0xffc00000) != 0xf9400000 || ((ldr >>> 5) & 31) != base ||
+				(ldr & 31) != 1) return null;
+		long pages = (((long) ((adrp >>> 5) & 0x7ffff)) << 2) | ((adrp >>> 29) & 3);
+		if ((pages & (1L << 20)) != 0) pages -= 1L << 21;
+		try {
+			long target = Math.addExact(Math.addExact(pc.getOffset() & ~0xfffL, pages << 12),
+				((long) ((ldr >>> 10) & 0xfff)) << 3);
+			return program.getAddressFactory().getDefaultAddressSpace().getAddress(target);
+		}
+		catch (ArithmeticException | AddressOutOfBoundsException ignored) { return null; }
 	}
 
 	private void applyCallObjcOverrides(Program program, AddressSetView set, TaskMonitor monitor)

@@ -1,4 +1,6 @@
-# ghidra-hopper-rs (v0.3.0)
+# ghidra-hopper-rs (v0.3.1)
+
+> **Ghidra 12.3_DEV · REA 6.10.1 동기화 및 Windows x86_64 헤드리스 프로바이더 지원 / 2026-11-22:** Ghidra 12.3_DEV(`3fb3eec6a0` / `71506bafd3e4`)의 ARM64 `LDURSB`/`LDURSH` 32비트 `Wt` 상위 비트 zero-extension 시맨틱을 반영하고, 기존 macOS `arm64` 전용이었던 외부 헤드리스 Ghidra 디컴파일 프로바이더(`ghidra-decompile`)를 **Windows `x86_64` (`Ghidra 12.2/12.3` + `OpenJDK 25`, PE32+ `decompile.exe` SHA-256 검증)** 환경에서도 동작하도록 확장했습니다. 전체 24개 테스트 스위트 및 Windows 실환경 `analyzeHeadless` E2E C 디컴파일(`RUNTIME_CHECKED: true`)을 통과했습니다.
 
 > **남은 런타임 분기 네 곳 실제 검증 / 2026-10-31:** 기본 ART/CheckJNI 네 프로세스에서 원본 ELF를 실행해 새 캡처 16개를 얻었습니다. ThrowNew, NewDirectByteBuffer 및 entry X0로 등록한 callback의 실제 대상을 해석합니다. PLT resolver는 GOT·x17=0과 원본/계측 SIGSEGV를 확인해 호출 가능한 대상으로 바꾸지 않고 INCOMPLETE를 유지합니다. 캡처 없는 516쌍은 이전과 같고, 같은 새 캡처를 준 48쌍에서 구버전의 미지원 옵션/schema 오류도 숨기지 않았습니다. 외부 본문 디코딩 없이 원래 명령 수·예산을 유지하며 디버그 154개·릴리스 20개 테스트를 통과했습니다. [실제 값·조건부 해석·null fault·비교·재현](validation/runtime_branches/REPORT.md).
 
@@ -42,7 +44,7 @@
 >
 > MCP는 `binary_overview`, `provider_status`, `demangle_swift`만 제공합니다. 문서를 로드하지 않은 상태에서 `decompile_objc`, `set_byte_state`, `rename_register`가 성공한 것처럼 응답하던 동작은 제거했습니다. 상태 응답의 공급자 버전은 설정값이며 실시간 상태 검사가 아닙니다. `tools/call` 결과는 MCP `content` 배열 형식으로 변경되었습니다. Rust API의 `ObjCMetadata`는 `selector_references`와 일반 ELF `symbols`를 별도 필드로 제공합니다.
 
-**Rust-Native Reverse Engineering Engine** combining **Ghidra 12.3_DEV (`4718f50d99`, 2026-10-31)** (`SLEIGH` / `P-Code` SSA Decompiler, `ObjcMessageAnalyzer`, `DecompilerSwitchAnalysisCmd`, `JumpTable`, `ReferenceManager`, `BookmarkManager`) with **Hopper Disassembler 6.6.0 (`42.6316032`)** and **REA 6.8.0 (`v49` skill, 229 tools, 15 Frontier Agents configured)** (O(1) `ByteType` Reactive State Machine & `C/P/A/D/U` Interactive Hotkeys, Zero-IPC `__objc_stubs` / `__objc_selrefs` `CALL_OBJC` Recovery, Swift 5 `$s` Demangler, Objective-C `self`/`_cmd` Register Aliasing, `SwitchHintTable` Indirect Branch Override, 4-Mode Unified View `[ASM | CFG | Pseudocode | Hex]`, and Built-in STDIO MCP Server).
+**Rust-Native Reverse Engineering Engine** combining **Ghidra 12.3_DEV (`3fb3eec6a0`, 2026-11-22)** (`SLEIGH` / `P-Code` SSA Decompiler, `ObjcMessageAnalyzer`, `DecompilerSwitchAnalysisCmd`, `JumpTable`, `ReferenceManager`, `BookmarkManager`) with **Hopper Disassembler 6.6.0 (`42.6316032`)** and **REA 6.10.1 (`v63` skill, 263 tools, 15 Frontier Agents configured)** (O(1) `ByteType` Reactive State Machine & `C/P/A/D/U` Interactive Hotkeys, Zero-IPC `__objc_stubs` / `__objc_selrefs` `CALL_OBJC` Recovery, Swift 5 `$s` Demangler, Objective-C `self`/`_cmd` Register Aliasing, `SwitchHintTable` Indirect Branch Override, 4-Mode Unified View `[ASM | CFG | Pseudocode | Hex]`, and Built-in STDIO MCP Server).
 
 ---
 
