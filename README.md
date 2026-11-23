@@ -1,5 +1,7 @@
 # ghidra-hopper-rs (v0.3.1)
 
+> **Hopper 6.6.2 (`FAT_MAGIC_64`) · Ghidra 12.3_DEV (`3fb3eec6a0`) · REA 6.10.1 (`52437cd43`) · Rust 1.100.0 통합 동기화 / 2026-11-23:** Hopper 6.6.2 및 REA 6.10.1(`v63` skill, 263 tools, 204 CLI commands)에 맞춰 64비트 Universal Mach-O(`FAT_MAGIC_64 = 0xcafebabf` / `fat_arch_64`) 슬라이스 파싱을 지원하고, Ghidra 12.3_DEV의 `Objc1TypeEncodings`(`l`/`L`/`B` 크기 수정), `OpBehaviorIntSdiv`/`OpBehaviorIntSrem`(`INTB_MIN` 오버플로 가드), Swift `@objc` thunk(`To`)·데이터 심볼(`Tu`/`Twc`/`Tx`/`TX`/`Tv`/`Tvr`/`HF`)·`__swift_thiscall`·`ContextDescriptorKind`·중복 디맹글링 방지(`GP-7513`)를 Rust 및 Java 확장에 동기화했습니다.
+
 > **Ghidra 12.3_DEV · REA 6.10.1 동기화 및 Windows x86_64 헤드리스 프로바이더 지원 / 2026-11-22:** Ghidra 12.3_DEV(`3fb3eec6a0` / `71506bafd3e4`)의 ARM64 `LDURSB`/`LDURSH` 32비트 `Wt` 상위 비트 zero-extension 시맨틱을 반영하고, 기존 macOS `arm64` 전용이었던 외부 헤드리스 Ghidra 디컴파일 프로바이더(`ghidra-decompile`)를 **Windows `x86_64` (`Ghidra 12.2/12.3` + `OpenJDK 25`, PE32+ `decompile.exe` SHA-256 검증)** 환경에서도 동작하도록 확장했습니다. 전체 24개 테스트 스위트 및 Windows 실환경 `analyzeHeadless` E2E C 디컴파일(`RUNTIME_CHECKED: true`)을 통과했습니다.
 
 > **남은 런타임 분기 네 곳 실제 검증 / 2026-10-31:** 기본 ART/CheckJNI 네 프로세스에서 원본 ELF를 실행해 새 캡처 16개를 얻었습니다. ThrowNew, NewDirectByteBuffer 및 entry X0로 등록한 callback의 실제 대상을 해석합니다. PLT resolver는 GOT·x17=0과 원본/계측 SIGSEGV를 확인해 호출 가능한 대상으로 바꾸지 않고 INCOMPLETE를 유지합니다. 캡처 없는 516쌍은 이전과 같고, 같은 새 캡처를 준 48쌍에서 구버전의 미지원 옵션/schema 오류도 숨기지 않았습니다. 외부 본문 디코딩 없이 원래 명령 수·예산을 유지하며 디버그 154개·릴리스 20개 테스트를 통과했습니다. [실제 값·조건부 해석·null fault·비교·재현](validation/runtime_branches/REPORT.md).

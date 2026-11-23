@@ -313,4 +313,37 @@ public class HopperHybridObjcAnalyzer extends AbstractAnalyzer {
 		}
 		return sb.toString();
 	}
+
+	/**
+	 * Matches Ghidra 12.3_DEV SwiftGlobalNode.java (5c92f59b1): preserves @objc thunk awareness.
+	 */
+	public static boolean isSwiftObjcThunk(String sym) {
+		if (sym == null) {
+			return false;
+		}
+		String rest = sym.startsWith("_$s") ? sym.substring(3)
+			: (sym.startsWith("$s") ? sym.substring(2) : null);
+		return rest != null && rest.endsWith("To");
+	}
+
+	/**
+	 * Matches Ghidra 12.3_DEV SwiftGlobalNode.java & SwiftDemangledNodeKind.java (5d3b9cefa):
+	 * classifies Swift data symbols so functions are not created on data records.
+	 */
+	public static boolean isSwiftDataSymbol(String sym) {
+		if (sym == null) {
+			return false;
+		}
+		String rest = sym.startsWith("_$s") ? sym.substring(3)
+			: (sym.startsWith("$s") ? sym.substring(2) : null);
+		if (rest == null) {
+			return false;
+		}
+		for (String suffix : new String[] { "Tu", "Twc", "Tx", "TX", "Tv", "Tvr", "HF" }) {
+			if (rest.endsWith(suffix)) {
+				return true;
+			}
+		}
+		return false;
+	}
 }
