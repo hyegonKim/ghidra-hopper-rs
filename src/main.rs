@@ -115,7 +115,7 @@ fn main() {
     }
 
     if mode == "mcp" {
-        let summary = r#"{"engine":"ghidra-hopper-rs","version":"0.3.1","status":"no_document_loaded","provider_health":"not_checked","engine_scope":"partial_arm64","full_ssa_decompiler":false,"document_mutation":false,"synced_rea":"6.10.1","synced_ghidra":"12.3_DEV"}"#;
+        let summary = r#"{"engine":"ghidra-hopper-rs","version":"0.3.1","status":"no_document_loaded","provider_health":"not_checked","engine_scope":"partial_arm64","full_ssa_decompiler":false,"document_mutation":false,"synced_rea":"6.10.1","synced_ghidra":"12.3_DEV","synced_hopper":"6.6.2","synced_rust":"1.100.0"}"#;
         if let Err(err) = mcp_server::run_stdio_mcp_loop(summary) {
             eprintln!("MCP transport error: {err}");
             std::process::exit(1);
@@ -242,7 +242,7 @@ fn main() {
         }
 
         println!("╔════════════════════════════════════════════════════════════════════════╗");
-        println!("║  ghidra-hopper-rs Partial ARM64 Analysis (v0.3.0)                     ║");
+        println!("║  ghidra-hopper-rs Partial ARM64 Analysis (v0.3.1)                     ║");
         println!("╚════════════════════════════════════════════════════════════════════════╝");
         println!("Target Binary   : {}", target_path);
         println!(
