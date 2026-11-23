@@ -299,8 +299,8 @@ fn main() {
     let start_time = Instant::now();
     println!("SYNTHETIC DEMO ONLY: no real binary is analyzed below");
     println!("╔════════════════════════════════════════════════════════════════════════╗");
-    println!("║  Ghidra 12.3_DEV + Hopper 6.6.0 Hybrid Engine (ghidra-hopper-rs v0.3.1)║");
-    println!("║  Synced: Ghidra 3fb3eec6a0 | Ghidra 12.2 PUBLIC | REA 6.10.1 ad6e511b6 ║");
+    println!("║  Ghidra 12.3_DEV + Hopper 6.6.2 Hybrid Engine (ghidra-hopper-rs v0.3.1)║");
+    println!("║  Synced: Ghidra 3fb3eec6a0 | Hopper 6.6.2 | REA 6.10.1 | Rust 1.100.0  ║");
     println!("╚════════════════════════════════════════════════════════════════════════╝");
 
     // 2. Execute the Rust-ported Ghidra `HopperHybridObjcAnalyzerRs` + `GhidraJumpTable`
@@ -367,8 +367,14 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ghidra_hopper_rs::ghidra_port::GhidraRefType;
-    use ghidra_hopper_rs::segment::ByteType;
+    use ghidra_hopper_rs::ghidra_port::{
+        evaluate_pcode_int_sdiv, evaluate_pcode_int_srem, GhidraRefType, ObjcDataTypes,
+    };
+    use ghidra_hopper_rs::macho_objc::{FAT_MAGIC_64, MH_MAGIC_64};
+    use ghidra_hopper_rs::segment::{
+        demangle_swift_with_attrs, is_swift_data_symbol, is_swift_objc_thunk,
+        swift_convention_uses_class_namespace, ByteType, SwiftContextDescriptorKind,
+    };
 
     #[test]
     fn test_ported_ghidra_objc_and_switch_analyzer() {
@@ -460,5 +466,75 @@ mod tests {
             demangle_symbol("_$s6Hopper16HybridDecompilerC7analyzeSbSS_tF"),
             "swift::Hopper.HybridDecompiler.analyze"
         );
+    }
+
+    #[test]
+    fn test_ghidra_3fb3eec6a0_and_hopper_6_6_2_updates() {
+        let dt = ObjcDataTypes::default();
+        assert_eq!(dt.objc1_type_encoding_size('l'), Some(("long", 4)));
+        assert_eq!(dt.objc1_type_encoding_size('L'), Some(("unsigned long", 4)));
+        assert_eq!(dt.objc1_type_encoding_size('q'), Some(("long long", 8)));
+        assert_eq!(
+            dt.objc1_type_encoding_size('Q'),
+            Some(("unsigned long long", 8))
+        );
+        assert_eq!(dt.objc1_type_encoding_size('B'), Some(("bool", 1)));
+
+        let thunk_sym = "_$s6Hopper16HybridDecompilerC7analyzeSbSS_tFTo";
+        assert!(is_swift_objc_thunk(thunk_sym));
+        let demangled_thunk = demangle_swift_with_attrs(thunk_sym);
+        assert_eq!(
+            demangled_thunk,
+            "@objc swift::Hopper.HybridDecompiler.analyze"
+        );
+        // Ghidra GP-7513 (fe5d7e258d): idempotent demangling on already-demangled symbols
+        assert_eq!(demangle_symbol(&demangled_thunk), demangled_thunk);
+        assert_eq!(demangle_swift_with_attrs(&demangled_thunk), demangled_thunk);
+        assert_eq!(demangle_symbol("cxx::3Foo3barEv"), "cxx::3Foo3barEv");
+
+        let async_fp_sym = "_$s6Hopper16HybridDecompilerC7analyzeSbSS_tFTu";
+        assert!(is_swift_data_symbol(async_fp_sym));
+        let mut seg = Segment::new("__TEXT", 0x1000, 0, vec![0u8; 16]);
+        seg.function_starts.insert(0x1000);
+        seg.set_name_at_address(0x1000, async_fp_sym);
+        assert!(!seg.function_starts.contains(&0x1000));
+
+        // Ghidra 17c5ad2f0b: __swift_thiscall promotes enclosing namespace to class
+        assert!(swift_convention_uses_class_namespace("__swift_thiscall"));
+        assert!(swift_convention_uses_class_namespace("__thiscall"));
+        assert!(!swift_convention_uses_class_namespace("__swiftcall"));
+
+        // Ghidra a6a99e1dc8: null-safe ContextDescriptorKind lookup on unknown kind bits
+        assert_eq!(
+            SwiftContextDescriptorKind::from_flags(0x8000_0010),
+            Some(SwiftContextDescriptorKind::Class)
+        );
+        assert_eq!(SwiftContextDescriptorKind::from_flags(0x8000_001f), None);
+
+        // Ghidra PR-10150 (0a0ffd6945): OpBehaviorIntSdiv / OpBehaviorIntSrem INTB_MIN overflow
+        assert_eq!(evaluate_pcode_int_sdiv(i64::MIN, -1), Some(i64::MIN));
+        assert_eq!(evaluate_pcode_int_srem(i64::MIN, -1), Some(0));
+        assert_eq!(evaluate_pcode_int_sdiv(42, 0), None);
+        assert_eq!(evaluate_pcode_int_srem(42, 0), None);
+
+        // Hopper 6.6.2 / REA 6.10.1: 64-bit Universal Mach-O (FAT_MAGIC_64 = 0xcafebabf)
+        let mut thin_arm64 = vec![0u8; 32];
+        thin_arm64[0..4].copy_from_slice(&MH_MAGIC_64.to_le_bytes());
+        thin_arm64[4..8].copy_from_slice(&0x0100000cu32.to_le_bytes()); // CPU_TYPE_ARM64
+        let mut fat64 = Vec::new();
+        fat64.extend_from_slice(&FAT_MAGIC_64.to_be_bytes());
+        fat64.extend_from_slice(&1u32.to_be_bytes()); // nfat_arch = 1
+        fat64.extend_from_slice(&0x0100000cu32.to_be_bytes()); // cputype = arm64
+        fat64.extend_from_slice(&0u32.to_be_bytes()); // cpusubtype
+        fat64.extend_from_slice(&64u64.to_be_bytes()); // 64-bit offset
+        fat64.extend_from_slice(&(thin_arm64.len() as u64).to_be_bytes()); // 64-bit size
+        fat64.extend_from_slice(&14u32.to_be_bytes()); // align
+        fat64.extend_from_slice(&0u32.to_be_bytes()); // reserved
+        fat64.resize(64, 0);
+        fat64.extend_from_slice(&thin_arm64);
+        let parsed = MachOImage::parse(&fat64).expect("FAT_MAGIC_64 should parse");
+        assert!(parsed.is_universal);
+        assert_eq!(parsed.selected_arch, "arm64");
+        assert_eq!(parsed.slices.len(), 1);
     }
 }

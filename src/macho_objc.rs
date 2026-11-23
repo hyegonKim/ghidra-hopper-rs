@@ -14,6 +14,7 @@ mod chained;
 mod imports;
 
 pub const FAT_MAGIC: u32 = 0xcafebabe;
+pub const FAT_MAGIC_64: u32 = 0xcafebabf;
 pub const MH_MAGIC_64: u32 = 0xfeedfacf;
 pub const ELF_MAGIC: u32 = 0x7f454c46;
 pub const LC_SEGMENT_64: u32 = 0x19;
@@ -122,6 +123,13 @@ pub struct MachOImage {
 fn read_u32_be(buf: &[u8], off: usize) -> Option<u32> {
     let s = buf.get(off..off.checked_add(4)?)?;
     Some(u32::from_be_bytes([s[0], s[1], s[2], s[3]]))
+}
+
+fn read_u64_be(buf: &[u8], off: usize) -> Option<u64> {
+    let s = buf.get(off..off.checked_add(8)?)?;
+    Some(u64::from_be_bytes([
+        s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7],
+    ]))
 }
 
 fn read_u16_le(buf: &[u8], off: usize) -> Option<u16> {
@@ -234,8 +242,8 @@ fn record_function_starts(data: &[u8], base: u64, segments: &mut [Segment]) -> R
 }
 
 impl MachOImage {
-    /// Parses either a Universal Mach-O (`0xCAFEBABE`) or a thin 64-bit Mach-O (`0xFEEDFACF`),
-    /// preferring the `arm64` slice on Apple Silicon just like Hopper Disassembler.
+    /// Parses either a Universal Mach-O (`0xCAFEBABE` / `0xCAFEBABF`) or a thin 64-bit Mach-O (`0xFEEDFACF`),
+    /// preferring the `arm64` slice on Apple Silicon just like Hopper Disassembler 6.6.2.
     pub fn parse(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() < 32 {
             return Err("Binary too small for Mach-O header".into());
@@ -247,21 +255,36 @@ impl MachOImage {
         if magic_be == ELF_MAGIC {
             return Self::parse_elf64(bytes);
         }
-        let (is_universal, slice_bytes, selected_arch) = if magic_be == FAT_MAGIC {
+        let (is_universal, slice_bytes, selected_arch) = if magic_be == FAT_MAGIC
+            || magic_be == FAT_MAGIC_64
+        {
+            let is_fat64 = magic_be == FAT_MAGIC_64;
+            let stride = if is_fat64 { 32 } else { 20 };
             let nfat_arch = read_u32_be(bytes, 4).ok_or("Truncated fat_header")? as usize;
             if nfat_arch == 0 {
                 return Err("Empty universal architecture table".into());
             }
-            validate_table(8, nfat_arch, 20, 20, bytes.len())?;
+            validate_table(8, nfat_arch, stride, stride, bytes.len())?;
             let mut chosen_off = 0usize;
             let mut chosen_size = 0usize;
             let mut chosen_arch = "unknown";
             for i in 0..nfat_arch {
-                let base = 8 + i * 20;
+                let base = 8 + i * stride;
                 let cpu_type = read_u32_be(bytes, base).ok_or("Truncated fat_arch")?;
                 let cpu_subtype = read_u32_be(bytes, base + 4).ok_or("Truncated fat_arch")?;
-                let offset = read_u32_be(bytes, base + 8).ok_or("Truncated fat_arch")? as usize;
-                let size = read_u32_be(bytes, base + 12).ok_or("Truncated fat_arch")? as usize;
+                let (offset, size) = if is_fat64 {
+                    let off64 = read_u64_be(bytes, base + 8).ok_or("Truncated fat_arch_64")?;
+                    let sz64 = read_u64_be(bytes, base + 16).ok_or("Truncated fat_arch_64")?;
+                    (
+                        usize::try_from(off64).map_err(|_| "Universal slice offset overflow")?,
+                        usize::try_from(sz64).map_err(|_| "Universal slice size overflow")?,
+                    )
+                } else {
+                    (
+                        read_u32_be(bytes, base + 8).ok_or("Truncated fat_arch")? as usize,
+                        read_u32_be(bytes, base + 12).ok_or("Truncated fat_arch")? as usize,
+                    )
+                };
                 checked_range(offset, size, bytes.len())?;
                 let arch_name = cpu_type_name(cpu_type);
                 slices.push(ArchSlice {

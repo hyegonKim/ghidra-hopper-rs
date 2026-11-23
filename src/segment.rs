@@ -397,6 +397,9 @@ impl Segment {
 
     pub fn set_name_at_address(&mut self, addr: u64, name: impl Into<String>) {
         let raw = name.into();
+        if is_swift_data_symbol(&raw) {
+            self.function_starts.remove(&addr);
+        }
         let demangled = demangle_symbol(&raw);
         if demangled != raw {
             self.demangled_labels.insert(addr, demangled);
@@ -481,9 +484,89 @@ fn is_printable_ascii(b: u8) -> bool {
     (0x20..=0x7e).contains(&b)
 }
 
+/// Port of Ghidra 12.3_DEV `SwiftGlobalNode.java` (`5c92f59b1`):
+/// Detects whether a mangled Swift symbol (`_$s` / `$s`) is an `@objc` thunk (`To` suffix),
+/// preserving the `@objc` attribute and Objective-C calling signature.
+pub fn is_swift_objc_thunk(sym: &str) -> bool {
+    let Some(rest) = sym.strip_prefix("_$s").or_else(|| sym.strip_prefix("$s")) else {
+        return false;
+    };
+    rest.ends_with("To")
+}
+
+/// Port of Ghidra 12.3_DEV `SwiftGlobalNode.java` & `SwiftDemangledNodeKind.java` (`5d3b9cefa`):
+/// Detects Swift data symbols (`Tu` async function pointer, `Twc` protocol witness table,
+/// `Tx`/`TX` swift5_typeref, `Tv`/`Tvr` swift5_fieldmd, `HF` swift5_accessible_functions)
+/// so they are labeled as data symbols instead of having functions created on them.
+pub fn is_swift_data_symbol(sym: &str) -> bool {
+    let Some(rest) = sym.strip_prefix("_$s").or_else(|| sym.strip_prefix("$s")) else {
+        return false;
+    };
+    ["Tu", "Twc", "Tx", "TX", "Tv", "Tvr", "HF"]
+        .iter()
+        .any(|suffix| rest.ends_with(suffix))
+}
+
+/// Demangles a Swift symbol while preserving the `@objc` thunk prefix when present (`5c92f59b1`)
+/// and avoiding double-demangling (`GP-7513` / `fe5d7e258d`).
+pub fn demangle_swift_with_attrs(sym: &str) -> String {
+    if sym.starts_with("@objc swift::") || sym.starts_with("swift::") {
+        return sym.to_string();
+    }
+    let base = demangle_symbol(sym);
+    if is_swift_objc_thunk(sym) {
+        format!("@objc {}", base)
+    } else {
+        base
+    }
+}
+
+/// Port of Ghidra 12.3_DEV `SwiftFunction.maybeCreateClassStructure` (`17c5ad2f0b`):
+/// `__swift_thiscall` has an implicit `self`/`this` pointer like `__thiscall`, so its enclosing
+/// namespace must be promoted to a class namespace.
+pub fn swift_convention_uses_class_namespace(convention: &str) -> bool {
+    matches!(convention, "__thiscall" | "__swift_thiscall")
+}
+
+/// Port of Ghidra 12.3_DEV `ContextDescriptorKind` + `SwiftTypeMetadata` (`a6a99e1dc8`):
+/// Null-safe parsing of Swift `ContextDescriptorFlags` kind bits (`flags & 0x1f`) so unrecognized
+/// descriptor kinds return `None` instead of aborting metadata parsing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum SwiftContextDescriptorKind {
+    Module = 0,
+    Extension = 1,
+    Anonymous = 2,
+    Protocol = 3,
+    OpaqueType = 4,
+    Class = 16,
+    Struct = 17,
+    Enum = 18,
+}
+
+impl SwiftContextDescriptorKind {
+    pub fn from_flags(flags: u32) -> Option<Self> {
+        match (flags & 0x1f) as u8 {
+            0 => Some(Self::Module),
+            1 => Some(Self::Extension),
+            2 => Some(Self::Anonymous),
+            3 => Some(Self::Protocol),
+            4 => Some(Self::OpaqueType),
+            16 => Some(Self::Class),
+            17 => Some(Self::Struct),
+            18 => Some(Self::Enum),
+            _ => None,
+        }
+    }
+}
+
 /// Hopper-style Swift 5 (`_$s` / `$s`), C++ (`__Z`), and Objective-C (`-[Class sel:]`) symbol demangler.
 /// Parses length-prefixed Swift 5 identifiers into `Module.Type.method(...)` notation.
+/// Idempotent on already-demangled symbols (`GP-7513` / `fe5d7e258d`).
 pub fn demangle_symbol(sym: &str) -> String {
+    if sym.starts_with("swift::") || sym.starts_with("@objc swift::") || sym.starts_with("cxx::") {
+        return sym.to_string();
+    }
     if let Some(rest) = sym.strip_prefix("_$s").or_else(|| sym.strip_prefix("$s")) {
         let mut parts = Vec::new();
         let bytes = rest.as_bytes();

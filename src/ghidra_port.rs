@@ -137,6 +137,64 @@ impl Default for ObjcDataTypes {
     }
 }
 
+impl ObjcDataTypes {
+    /// Port of `Objc1TypeEncodings.processTypeSignature` in Ghidra 12.3_DEV (`dbaed0454`):
+    /// `_C_LNG` (`'l'`) and `_C_ULNG` (`'L'`) are treated as 32-bit `DWordDataType` (4 bytes)
+    /// on 64-bit Objective-C runtimes, `_C_LNG_LNG` (`'q'`) / `_C_ULNG_LNG` (`'Q'`) are 8 bytes,
+    /// and `_C_BOOL` (`'B'`) is 1-byte `BooleanDataType`.
+    pub fn objc1_type_encoding_size(&self, enc: char) -> Option<(&'static str, usize)> {
+        match enc {
+            'c' => Some(("char", 1)),
+            'C' => Some(("uchar", 1)),
+            's' => Some(("short", 2)),
+            'S' => Some(("ushort", 2)),
+            'i' => Some(("int", 4)),
+            'I' => Some(("uint", 4)),
+            'l' => Some(("long", 4)),
+            'L' => Some(("unsigned long", 4)),
+            'q' => Some(("long long", 8)),
+            'Q' => Some(("unsigned long long", 8)),
+            'f' => Some(("float", 4)),
+            'd' => Some(("double", 8)),
+            'B' => Some(("bool", 1)),
+            'v' => Some(("void", 0)),
+            '*' => Some(("char*", self.ptr_size)),
+            '@' => Some((self.id_type, self.ptr_size)),
+            '#' => Some((self.class_t_type, self.ptr_size)),
+            ':' => Some((self.sel_type, self.ptr_size)),
+            _ => None,
+        }
+    }
+}
+
+/// Port of `OpBehaviorIntSdiv::evaluateBinary` in Ghidra 12.3_DEV (`0a0ffd6945` / `3fb3eec6a0`):
+/// Explicitly guards `INTB_MIN / -1` signed overflow (`sres = INTB_MIN`) and divide-by-zero (`None`).
+pub fn evaluate_pcode_int_sdiv(num: i64, denom: i64) -> Option<i64> {
+    if denom == 0 {
+        return None;
+    }
+    const INTB_MIN: i64 = i64::MIN;
+    if num == INTB_MIN && denom == -1 {
+        Some(INTB_MIN)
+    } else {
+        Some(num / denom)
+    }
+}
+
+/// Port of `OpBehaviorIntSrem::evaluateBinary` in Ghidra 12.3_DEV (`0a0ffd6945` / `3fb3eec6a0`):
+/// Explicitly guards `INTB_MIN % -1` signed overflow (`sres = 0`) and remainder-by-zero (`None`).
+pub fn evaluate_pcode_int_srem(val: i64, modulo: i64) -> Option<i64> {
+    if modulo == 0 {
+        return None;
+    }
+    const INTB_MIN: i64 = i64::MIN;
+    if val == INTB_MIN && modulo == -1 {
+        Some(0)
+    } else {
+        Some(val % modulo)
+    }
+}
+
 /// Unified Rust representation of Ghidra's `ProgramDB` + Hopper's `Document`.
 #[derive(Debug, Clone)]
 pub struct GhidraProgram {
